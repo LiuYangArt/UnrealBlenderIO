@@ -1,14 +1,14 @@
 import bpy
 from bpy.props import (
-    BoolProperty,
-    EnumProperty,
-    FloatProperty,
-    FloatVectorProperty,
-    IntProperty,
+    # BoolProperty,
+    # EnumProperty,
+    # FloatProperty,
+    # FloatVectorProperty,
+    # IntProperty,
     StringProperty,
 )
 from bpy.types import PropertyGroup
-from .util import DEFAULT_IO_TEMP_DIR
+from .util import Const
 
 
 
@@ -23,7 +23,7 @@ class UIParams(PropertyGroup):
     ubio_json_path: StringProperty(
         name="UBIO JSON Path",
         description="UBIO JSON文件路径",
-        default=DEFAULT_IO_TEMP_DIR + "*.json",
+        default=Const.DEFAULT_IO_TEMP_DIR + "*.json",
         maxlen=1024,
         subtype="FILE_PATH",
         options={'HIDDEN'},

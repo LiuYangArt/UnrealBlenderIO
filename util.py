@@ -1,309 +1,39 @@
 import bpy
 from mathutils import Vector
-import addon_utils
+from math import radians
+from math import pi
+# import addon_utils
 
-# constants | 常值
+# =====================
+# 全局常量（供全项目使用）
+# =====================
 
-ADDON_NAME = "Unreal Blender IO"
-# for mod in addon_utils.modules():
-#     if mod.bl_info["name"] == ADDON_NAME:
-#         filepath = mod.__file__
-#         path = filepath.split("\__init__.py")[0]
-#         path = path.replace("\\", "/")
-#         preset_path = path + "/PresetFiles/Presets.blend"
-# GROUP_MOD = "CAT_MeshGroup"
-# MIRROR_MOD = "CAT_Mirror"
-# ARRAY_MOD = "CAT_Array"
-# DISPLACE_MOD = "CAT_DecalDisplace"
-# GROUP_NODE = "MeshGroup"
-# INST_PREFIX = "Inst_"
-# CUSTOM_NAME = "CAT"
-# PIVOT_NAME = "CAT_Inst_Pivot"
-# DECAL_NAME = "CAT_Decal"
-# INSTANCE_NAME = "CAT_Inst"
-# TEMP_MESH = "cat_meshgruop_tempmesh"
-# OFFSET_ATTR = "CAT_Offset"
-# WORLD_ORIGIN = Vector((0, 0, 0))
-# MG_SOCKET_GROUP = "Socket_2"
-# MG_SOCKET_REALIZE = "Socket_3"
-# MG_SOCKET_OFFSET = "Socket_7"
-# DECAL_OFFSET = 0.008
-DEFAULT_IO_TEMP_DIR="C:\\Temp\\UBIO\\"
-
-# functions
-# def import_node_group(file_path, node_name) -> bpy.types.NodeGroup:
-#     """从文件载入NodeGroup"""
-
-#     INNER_PATH = "/NodeTree"
-#     FULL_PATH = str(file_path) + INNER_PATH
-#     node_exist = False
-#     for node in bpy.data.node_groups:
-#         if node_name not in node.name:
-#             node_exist = False
-#         else:
-#             node_exist = True
-#             node_import = node
-#             break
-
-#     if node_exist is False:  # 如果没有导入，导入
-#         bpy.ops.wm.append(
-#             filepath=str(file_path),
-#             directory=FULL_PATH,
-#             filename=node_name,
-#         )
-
-#     for node in bpy.data.node_groups:
-#         if node.name == node_name:
-#             node_import = node
-#             break
-
-#     return node_import
-
-
-# def add_meshgroup_modifier(mesh, target_group=None, offset=Vector((0, 0, 0))):
-#     """添加Geometry Nodes MeshGroup Modifier"""
-
-#     check_modifier = False
-#     offset = Vector(offset)
-#     offset = WORLD_ORIGIN - offset
-
-#     for modifier in mesh.modifiers:
-#         if modifier.name == GROUP_MOD:
-#             check_modifier = True
-#             break
-
-#     if check_modifier is False:
-#         geo_node_modifier = mesh.modifiers.new(name=GROUP_MOD, type="NODES")
-#         geo_node_modifier.node_group = bpy.data.node_groups[GROUP_NODE]
-#     else:
-#         geo_node_modifier = mesh.modifiers[GROUP_MOD]
-#         geo_node_modifier.node_group = bpy.data.node_groups[GROUP_NODE]
-
-#     # set Collection Instance to target group
-#     geo_node_modifier[MG_SOCKET_GROUP] = target_group
-#     # set offset
-#     geo_node_modifier[MG_SOCKET_OFFSET] = offset
-
-#     return geo_node_modifier
-
-
-# def add_mirror_modifier(mesh, axis=0):
-#     """添加DataTransfer Modifier传递顶点色"""
-
-#     # proxy_object = bpy.data.objects[TRANSFERPROXY_PREFIX + mesh.name]
-#     check_modifier = False
-#     pivot_object = mesh.parent
-
-#     for modifier in mesh.modifiers:  # 检查是否有modifier
-#         if modifier.name == MIRROR_MOD:
-#             check_modifier = True
-#             break
-
-#     if check_modifier is False:  # 如果没有则添加
-#         mirror_modifier = mesh.modifiers.new(name=MIRROR_MOD, type="MIRROR")
-#         mirror_modifier.mirror_object = pivot_object
-#         mirror_modifier.use_axis[axis] = True
-#         mirror_modifier.use_bisect_axis[axis] = True
-#         mirror_modifier.use_mirror_merge = True
-
-
-# def add_array_modifier(mesh):
-#     """添加Array Modifier"""
-#     check_modifier = False
-
-#     for modifier in mesh.modifiers:  # 检查是否有modifier
-#         if modifier.name == ARRAY_MOD:
-#             check_modifier = True
-#             break
-
-#     if check_modifier is False:  # 如果没有则添加
-#         array_modifier = mesh.modifiers.new(name="CAT_Array", type="ARRAY")
-
-
-# def realize_meshgroup_modifier(mesh, realize=True):
-#     """Realize Geometry Nodes MeshGroup Modifier"""
-#     # check if the mesh has the modifier
-#     check_modifier = False
-
-#     for modifier in mesh.modifiers:
-#         if modifier.name == GROUP_MOD:
-#             check_modifier = True
-#             geo_node_modifier = mesh.modifiers[GROUP_MOD]
-#             geo_node_modifier[MG_SOCKET_REALIZE] = realize
-#             # 刷新gn， 否则结果不会更新
-#             mesh.modifiers[GROUP_MOD].show_viewport = True
-#             break
-
-#     if check_modifier is False:
-#         print("Mesh does not have the MeshGroup modifier")
-
-#     return check_modifier
-
-
-# def check_is_meshgroup_inst(obj):
-#     """Check if the object is a mesh-group instance"""
-#     is_meshgroup = False
-
-#     if obj.type == "MESH":
-#         try:
-#             if obj[CUSTOM_NAME] == INSTANCE_NAME:
-#                 # if has mesh group modifier
-#                 for modifier in obj.modifiers:
-#                     if modifier.type == "NODES":
-#                         if modifier.node_group.name == GROUP_NODE:
-#                             is_meshgroup = True
-#         except:
-#             pass
-#     return is_meshgroup
-
-
-# def set_work_mode(type):
-#     """Set the work mode of the viewport"""
-#     match type:
-#         case "MODELING":
-#             for collection in bpy.data.collections:
-#                 if collection.name.startswith("_"):
-#                      collection.hide_select=True
-#                 if collection.name=="_localfog":
-#                     collection.hide_viewport=True
-#                 if collection.name=="Plasticity":
-#                     collection.hide_viewport=False
-#                     collection.hide_select=False
-#             bpy.context.space_data.overlay.show_overlays = True
-
-#             bpy.context.space_data.overlay.show_cursor = False
-
-#             bpy.context.space_data.overlay.show_extras = False
-#             bpy.context.space_data.overlay.show_floor = False
-#             bpy.context.space_data.overlay.show_axis_x = False
-#             bpy.context.space_data.overlay.show_axis_y = False
-#             bpy.context.space_data.overlay.show_axis_z = False
-
-#             bpy.context.space_data.show_object_select_light_probe = False
-#             bpy.context.space_data.show_object_select_camera = False
-#             bpy.context.space_data.show_object_select_light = False
-#             bpy.context.space_data.show_object_select_volume = False
-
-#             bpy.context.space_data.show_object_select_mesh = True
-#             bpy.context.space_data.show_object_select_curve = True
-#             bpy.context.space_data.show_object_select_surf = True
-#             bpy.context.space_data.show_object_select_meta = True
-#             bpy.context.space_data.show_object_select_font = True
-#             bpy.context.space_data.show_object_select_curves = True
-#             bpy.context.space_data.show_object_select_pointcloud = True
-#             bpy.context.space_data.show_object_select_grease_pencil = True
-#             bpy.context.space_data.show_object_select_armature = True
-#             bpy.context.space_data.show_object_select_lattice = True
-#             bpy.context.space_data.show_object_select_empty = True
-
-#         case "LIGHTING":
-#             no_select_collections=[]
-#             for collection in bpy.data.collections:
-#                 if collection.name==("_env"):
-#                     collection.hide_select=False
-#                     collection.hide_viewport=False
-#                 if collection.name.startswith("_localfog"):
-#                      collection.hide_select=True
-#                      collection.hide_viewport=False
-#                 # if collection.name=="Plasticity" or "Decal" in collection.name:
-#                 #     no_select_collections.append(collection)
-#             for collection in no_select_collections:
-#                 collection.hide_select=True
-#             bpy.context.space_data.overlay.show_overlays = True
-
-#             bpy.context.space_data.overlay.show_cursor = False
-#             bpy.context.space_data.overlay.show_extras = True
-#             bpy.context.space_data.overlay.show_floor = False
-#             bpy.context.space_data.overlay.show_axis_x = False
-#             bpy.context.space_data.overlay.show_axis_y = False
-#             bpy.context.space_data.overlay.show_axis_z = False
-
-#             bpy.context.space_data.show_object_select_light_probe = True
-#             bpy.context.space_data.show_object_select_camera = False
-#             bpy.context.space_data.show_object_select_light = True
-
-#             bpy.context.space_data.show_object_select_volume = False
-#             bpy.context.space_data.show_object_select_mesh = False
-#             bpy.context.space_data.show_object_select_curve = False
-#             bpy.context.space_data.show_object_select_surf = False
-#             bpy.context.space_data.show_object_select_meta = False
-#             bpy.context.space_data.show_object_select_font = False
-#             bpy.context.space_data.show_object_select_curves = False
-#             bpy.context.space_data.show_object_select_pointcloud = False
-#             bpy.context.space_data.show_object_select_grease_pencil = False
-#             bpy.context.space_data.show_object_select_armature = False
-#             bpy.context.space_data.show_object_select_lattice = False
-#             bpy.context.space_data.show_object_select_empty = False
-
-#         case "LOCALFOG":
-#             no_select_collections=[]
-#             for collection in bpy.data.collections:
-#                 if collection.name.startswith("_localfog"):
-#                      collection.hide_select=False
-#                      collection.hide_viewport=False
-#                 if collection.name=="Plasticity":
-#                     no_select_collections.append(collection)
-#             for collection in no_select_collections:
-#                 collection.hide_select=True
-#             bpy.context.space_data.overlay.show_overlays = True
-
-#             bpy.context.space_data.overlay.show_extras = False
-#             bpy.context.space_data.overlay.show_floor = False
-#             bpy.context.space_data.overlay.show_axis_x = False
-#             bpy.context.space_data.overlay.show_axis_y = False
-#             bpy.context.space_data.overlay.show_axis_z = False
-
-#             bpy.context.space_data.show_object_select_light_probe = True
-#             bpy.context.space_data.show_object_select_camera = False
-#             bpy.context.space_data.show_object_select_light = False
-
-#             bpy.context.space_data.show_object_select_volume = True
-#             bpy.context.space_data.show_object_select_mesh = True
-#             bpy.context.space_data.show_object_select_curve = False
-#             bpy.context.space_data.show_object_select_surf = False
-#             bpy.context.space_data.show_object_select_meta = False
-#             bpy.context.space_data.show_object_select_font = False
-#             bpy.context.space_data.show_object_select_curves = False
-#             bpy.context.space_data.show_object_select_pointcloud = False
-#             bpy.context.space_data.show_object_select_grease_pencil = False
-#             bpy.context.space_data.show_object_select_armature = False
-#             bpy.context.space_data.show_object_select_lattice = False
-#             bpy.context.space_data.show_object_select_empty = False
-
-#         case "BLENDER DEFAULT":
-
-#             for collection in bpy.data.collections:
-#                 if collection.name.startswith("_"):
-#                      collection.hide_select=False
-
-#             bpy.context.space_data.overlay.show_overlays = True
-
-#             bpy.context.space_data.overlay.show_extras = True
-#             bpy.context.space_data.overlay.show_floor = True
-#             bpy.context.space_data.overlay.show_axis_x = True
-#             bpy.context.space_data.overlay.show_axis_y = True
-#             bpy.context.space_data.overlay.show_axis_z = False
-
-#             bpy.context.space_data.show_object_select_light_probe = True
-#             bpy.context.space_data.show_object_select_camera = True
-#             bpy.context.space_data.show_object_select_light = True
-#             bpy.context.space_data.show_object_select_volume = True
-
-#             bpy.context.space_data.show_object_select_mesh = True
-#             bpy.context.space_data.show_object_select_curve = True
-#             bpy.context.space_data.show_object_select_surf = True
-#             bpy.context.space_data.show_object_select_meta = True
-#             bpy.context.space_data.show_object_select_font = True
-#             bpy.context.space_data.show_object_select_curves = True
-#             bpy.context.space_data.show_object_select_pointcloud = True
-#             bpy.context.space_data.show_object_select_grease_pencil = True
-#             bpy.context.space_data.show_object_select_armature = True
-#             bpy.context.space_data.show_object_select_lattice = True
-#             bpy.context.space_data.show_object_select_empty = True
+class Const:
+    # Blender/Unreal通用常量
+    GUID = "ue_guid"
+    FNAME = "ue_fname"
+    ACTORTYPE = "ue_actortype"
+    ACTORCLASS = "ue_class"
+    UECOLL = "UnrealIO"
+    MAINLEVEL = "MainLevel"
+    COLL_ROOT = "Root"
+    COLL_MAIN = "Main"
+    COLL_LEVEL = "Level"
+    UECOLL_COLOR = "COLOR_06"
+    COLLINST_TYPES = ["Blueprint"]
+    BL_FLAG = "Blender"
+    BL_NEW = "NewActor"
+    BL_DEL = "Removed"
+    PROXY_PIVOT = "UBIOProxyPivot"
+    PROXY_PIVOT_OBJ = "Pivot"
+    CUSTOM_VAR = "UBIO"
+    # 其它常量
+    ADDON_NAME = "Unreal Blender IO"
+    DEFAULT_IO_TEMP_DIR = "C:\\Temp\\UBIO\\"
 
 
 def find_objs_bb_center(objs) -> Vector:
-    """Find the center of the bounding box of all objects"""
+    """查找所有对象Bounding Box的中心点"""
 
     all_coords = []
     for o in objs:
@@ -321,7 +51,7 @@ def find_objs_bb_center(objs) -> Vector:
 
 
 def find_objs_bb_lowest_center(objs) -> Vector:
-    """Find the lowest_center of the bounding box of all objects"""
+    """查找所有对象Bounding Box的最低中心点"""
 
     all_coords = []
     for o in objs:
@@ -345,8 +75,8 @@ def find_objs_bb_lowest_center(objs) -> Vector:
 
 
 def find_selected_element_center() -> Vector:
-    """When in object mode, find the center of the selected objects.
-    When in edit mode, find the center of the selected vertices in all selected mesh objects.
+    """在物体模式下，查找选中物体的中心点。
+    在编辑模式下，查找所有选中Mesh物体中选中顶点的中心点。
     """
 
     selected_objects = bpy.context.selected_objects
@@ -381,20 +111,145 @@ def find_selected_element_center() -> Vector:
 
 def set_object_pivot_location(obj, location: Vector):
     """
-    Set the object's origin (pivot) to the specified world location.
+    将对象的原点(pivot)设置到指定的世界坐标位置。
     """
 
     offset = location - obj.location
     obj.location += offset
-    # Move all vertices in the opposite direction to keep the mesh in place
+
     if obj.type == "MESH":
         mesh = obj.data
         for v in mesh.vertices:
             v.co -= offset
-    # For other object types, additional handling may be needed
+
 
 
 def clean_user(target_object: bpy.types.Object) -> None:
     """如果所选object有多个user，转为single user"""
     if target_object.users > 1:
         target_object.data = target_object.data.copy()
+
+
+def get_all_children(obj):
+    """
+    递归获取所有子对象
+    参数：
+        obj (bpy.types.Object): 父对象对象
+    返回：
+        list[bpy.types.Object]: 所有子对象的列表
+    """
+    children = []
+    for child in obj.children:
+        children.append(child)
+        children.extend(get_all_children(child))
+    return children
+
+
+def find_level_asset_coll(uecoll: str, coll_level: str):
+    """
+    查找Level Asset Collection
+    参数：
+        uecoll (str): 根集合名称（如Const.UECOLL）
+        coll_level (str): Level集合类型标记（如Const.COLL_LEVEL）
+    返回：
+        bpy.types.Collection or None: Level Asset集合对象或None
+    """
+    ubio_coll = bpy.data.collections.get(uecoll)
+    if not ubio_coll:
+        return None
+    sub_colls = get_all_children(ubio_coll)
+    for coll in sub_colls:
+        coll_type = coll.get(uecoll, None)
+        if coll_type == coll_level:
+            return coll
+    return None
+
+
+def set_proxy_pivot_properties(pivot):
+    """
+    设置Proxy Pivot对象的显示属性和自定义属性
+    参数：
+        pivot (bpy.types.Object): 需要设置的pivot对象
+    返回：
+        无
+    """
+    pivot.hide_viewport = False
+    pivot.hide_select = False
+    pivot.empty_display_type = 'ARROWS'
+    pivot.empty_display_size = 0.2
+    pivot.show_name = True
+    pivot.show_in_front = True
+    pivot[Const.CUSTOM_VAR] = Const.PROXY_PIVOT
+
+
+def get_transform_from_obj(obj):
+    """
+    从Blender对象获取UE风格的transform字典（自动处理坐标/角度/缩放转换）
+    参数：
+        obj (bpy.types.Object): 目标对象
+    返回：
+        dict: 包含location/rotation/scale的UE风格transform字典
+    """
+    loc = obj.location * 100
+    rot = obj.rotation_euler
+    rot_deg = [((r * 180.0 / pi) % 360) for r in rot]
+    scale = obj.scale
+    return {
+        "location": {
+            "x": loc.x,
+            "y": -loc.y,
+            "z": loc.z
+        },
+        "rotation": {
+            "x": rot_deg[0],
+            "y": -rot_deg[1],
+            "z": -rot_deg[2]
+        },
+        "scale": {
+            "x": scale.x,
+            "y": scale.y,
+            "z": scale.z
+        }
+    }
+
+
+def set_actor_transform(obj, transform):
+    """
+    设置Blender对象的transform，自动处理UE/Blender坐标系转换
+    参数：
+        obj (bpy.types.Object): 目标对象
+        transform (dict): UE风格transform字典（包含location/rotation/scale）
+    返回：
+        无
+    """
+
+    loc = transform["location"]
+    rot = transform["rotation"]
+    scale = transform["scale"]
+    obj.location = Vector((loc["x"]/100, -loc["y"]/100, loc["z"]/100))
+    obj.rotation_euler = (
+        radians(rot["x"]),
+        -radians(rot["y"]),
+        -radians(rot["z"])
+    )
+    obj.scale = Vector((scale["x"], scale["y"], scale["z"]))
+
+
+def is_obj_transform_equal(obj, transform, tol=0.01):
+    """
+    判断Blender对象与transform字典的transform是否近似相等
+    参数：
+        obj (bpy.types.Object): 目标对象
+        transform (dict): UE风格transform字典
+        tol (float): 容差，默认0.01
+    返回：
+        bool: 是否近似相等
+    """
+    ue_transform = get_transform_from_obj(obj)
+    def is_close(a, b):
+        return abs(a - b) < tol
+    for key in ["location", "rotation", "scale"]:
+        for axis in ["x", "y", "z"]:
+            if not is_close(ue_transform[key][axis], transform[key][axis]):
+                return False
+    return True
