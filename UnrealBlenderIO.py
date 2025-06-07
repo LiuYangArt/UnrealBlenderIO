@@ -480,8 +480,8 @@ class UBIO_OT_ExportUnrealJSON(bpy.types.Operator):
 
 
 class CleanUBIOTempFilesOperator(bpy.types.Operator):
-    bl_idname = "ubio.ubio_tempfiles"
-    bl_label = "CleanUBIOTempFiles"
+    bl_idname = "ubio.clean_tempfiles"
+    bl_label = "Clean UBIO Temp-Files"
     bl_description = "Clean UBIO Temp Files"
 
     def execute(self, context):

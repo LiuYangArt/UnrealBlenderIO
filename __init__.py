@@ -25,6 +25,7 @@ def register():
 
 def unregister():
     auto_load.unregister()
+    del bpy.types.Scene.ubio_params
 
 
 auto_load.init()

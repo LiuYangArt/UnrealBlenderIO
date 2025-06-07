@@ -58,7 +58,7 @@ class UBIOToolPanel(bpy.types.Panel):
         box_column.prop(parameters, "ubio_json_path", text="Path")
         box_column.operator("ubio.import_unreal_scene", icon="IMPORT")
         box_column.operator("ubio.export_unreal_scene_json", icon="EXPORT")
-        box_column.operator("ubio.clean_ubio_tempfiles", icon="FILE_REFRESH")
+        box_column.operator("ubio.clean_tempfiles", icon="FILE_REFRESH")
         box_column.separator()
         box_column.label(text="UBIO Tools")
         box_column.operator("ubio.add_proxy_pivot", icon="EMPTY_ARROWS")
