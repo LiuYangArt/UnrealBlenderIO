@@ -31,6 +31,16 @@ class UIParams(PropertyGroup):
         
 )
 
+    ubio_ue_project_path: StringProperty(
+        name="UE Project Path",
+        description="UE工程路径",
+        default="",
+        maxlen=1024,
+        subtype="DIR_PATH",
+        options={'HIDDEN'},
+    )
+        
+
 class UBIOToolPanel(bpy.types.Panel):
     bl_idname = "UBIO_PT_tool_panel"
     bl_label = "Unreal Blender IO"
@@ -54,4 +64,5 @@ class UBIOToolPanel(bpy.types.Panel):
         box_column.operator("ubio.add_proxy_pivot", icon="EMPTY_ARROWS")
         box_column.operator("ubio.mirror_copy_actors", icon="MOD_MIRROR")
         # box_column.operator("ubio.make_ue_actor_instance")
+
         
