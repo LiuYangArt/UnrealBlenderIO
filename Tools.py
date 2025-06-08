@@ -83,12 +83,12 @@ class UBIOMirrorCopyActorsOperator(bpy.types.Operator):
             self._draw_callback, (context,), 'WINDOW', 'POST_PIXEL'
         )
         context.window_manager.modal_handler_add(self)
-        self.report({'INFO'}, "按 X 切换轴，空格/Enter/右键确认，ESC撤销")
+        self.report({'INFO'}, "按下 X 或滚动鼠标滚轮切换镜像轴")
         return {'RUNNING_MODAL'}
 
     def modal(self, context, event):
         if (
-            event.type in {'LEFTMOUSE', 'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}
+            event.type in {'LEFTMOUSE', 'MIDDLEMOUSE'}
             or event.ctrl or event.alt or event.shift
         ):
             return {'PASS_THROUGH'}
@@ -96,6 +96,18 @@ class UBIOMirrorCopyActorsOperator(bpy.types.Operator):
             axis_order = ['X', 'Y', 'Z']
             current_idx = axis_order.index(self._axis)
             next_idx = (current_idx + 1) % 3
+            self._axis = axis_order[next_idx]
+            self._remove_mirrored(context)
+            self._do_mirror(context, self._axis)
+            self.report({'INFO'}, f"当前镜像轴: {self._axis}")
+            return {'RUNNING_MODAL'}
+        elif event.type in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}:
+            axis_order = ['X', 'Y', 'Z']
+            current_idx = axis_order.index(self._axis)
+            if event.type == 'WHEELUPMOUSE':
+                next_idx = (current_idx + 1) % 3
+            else:
+                next_idx = (current_idx - 1 + 3) % 3
             self._axis = axis_order[next_idx]
             self._remove_mirrored(context)
             self._do_mirror(context, self._axis)
@@ -124,7 +136,7 @@ class UBIOMirrorCopyActorsOperator(bpy.types.Operator):
         blf.size(font_id, 18)
         blf.color(font_id, 0.8, 0.8, 0.8, 0.8)
         blf.position(font_id, 60, 80, 0)
-        blf.draw(font_id, "按下 X 切换镜像轴")
+        blf.draw(font_id, "按下 X 或滚动鼠标滚轮切换镜像轴")
         blf.position(font_id, 60, 60, 0)
         blf.draw(font_id, "空格 / Enter / 右键 确认")
         blf.position(font_id, 60, 40, 0)
