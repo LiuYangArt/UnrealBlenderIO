@@ -63,6 +63,11 @@ class UBIOToolPanel(bpy.types.Panel):
         box_column.label(text="UBIO Tools")
         box_column.operator("ubio.add_proxy_pivot", icon="EMPTY_ARROWS")
         box_column.operator("ubio.mirror_copy_actors", icon="MOD_MIRROR")
+        box_column.operator("ubio.select_same_class_actors", icon="MESH_DATA")
+
+        
+
+        
         # box_column.operator("ubio.make_ue_actor_instance")
 
         

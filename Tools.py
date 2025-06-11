@@ -214,3 +214,46 @@ class UBIOMirrorCopyActorsOperator(bpy.types.Operator):
             if obj.name in bpy.data.objects:
                 bpy.data.objects.remove(obj, do_unlink=True)
         self.mirrored_objs.clear() 
+
+
+
+class SelectSameClassActorsOperator(bpy.types.Operator):
+    bl_idname = "ubio.select_same_class_actors"
+    bl_label = "Select Same Class Actors"
+    bl_description  = "批量选择同样class的对象"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+
+        selected_obj = context.active_object
+        if not selected_obj:
+            self.report({'WARNING'}, "请先选择一个对象。")
+            return {'CANCELLED'}
+
+        # 检查选中对象是否具有ACTORCLASS属性
+        if Const.ACTORCLASS not in selected_obj:
+            self.report({'WARNING'}, f"选中的对象 '{selected_obj.name}' 没有 '{Const.ACTORCLASS}' 属性。")
+            return {'CANCELLED'}
+
+        target_actor_class = selected_obj[Const.ACTORCLASS]
+
+        # 查找Level Asset集合
+        level_asset_coll = find_level_asset_coll(Const.UECOLL, Const.COLL_LEVEL)
+        if not level_asset_coll:
+            self.report({'WARNING'}, "未找到 Level Asset Collection。请确保场景中存在UnrealIO/Level集合。")
+            return {'CANCELLED'}
+
+        # 清除所有选中
+        bpy.ops.object.select_all(action='DESELECT')
+
+        selected_count = 0
+        for obj in level_asset_coll.objects:
+            if Const.ACTORCLASS in obj and obj[Const.ACTORCLASS] == target_actor_class:
+                obj.select_set(True)
+                selected_count += 1
+        
+        # 重新激活原选中对象
+        context.view_layer.objects.active = selected_obj
+
+        self.report({'INFO'}, f"成功选中 {selected_count} 个具有相同 Class 的对象。")
+        return {"FINISHED"}

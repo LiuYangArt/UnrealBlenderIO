@@ -1,6 +1,8 @@
 import bpy
 import os
+import random
 import json
+from mathutils import Color
 # import blf
 # from mathutils import Vector
 # from math import radians
@@ -240,6 +242,49 @@ def find_gpro_objs(objs):
                                     gpro_instances.extend(collection.all_objects)
     return gpro_instances
 
+def gen_random_color():
+    h = random.random()  # 色相
+    s = random.uniform(0.2, 0.7)  # 饱和度范围
+    v = random.uniform(0.5, 1.0)  # 亮度范围
+    
+    temp_color = Color()
+    temp_color.hsv = (h, s, v)
+    color = (temp_color.r, temp_color.g, temp_color.b, 1.0)
+    return color
+
+def set_random_color_by_class(target_objs):
+    class_objects = {}
+    for obj in target_objs:
+        if Const.ACTORCLASS in obj:
+            actor_class = obj[Const.ACTORCLASS]
+            if actor_class not in class_objects:
+                class_objects[actor_class] = []
+            class_objects[actor_class].append(obj)
+
+    # 为每个Class生成一个随机颜色，并设置对象颜色
+    
+    assigned_colors = set()
+
+    for actor_class, objects in class_objects.items():
+        # 生成一个独特的随机颜色
+        color = gen_random_color()
+        # 确保颜色在一定程度上是独特的，避免过于相近的颜色
+        while color in assigned_colors:
+            color = gen_random_color()
+        
+        assigned_colors.add(color)
+
+        for obj in objects:
+            obj.color=color
+    
+    #Set View Mode
+    bpy.context.space_data.shading.color_type = 'OBJECT'
+    bpy.context.space_data.shading.type = 'SOLID'
+    bpy.context.space_data.shading.light = 'MATCAP'
+    
+
+
+
 # =====================
 # 主要操作类
 # =====================
@@ -254,13 +299,13 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
         params = context.scene.ubio_params
         json_path = params.ubio_json_path
         with open(json_path, "r") as f:
-            scene_data = json.load(f)
+            json_scene_data = json.load(f)
         fbx_path = os.path.splitext(json_path)[0] + ".fbx"
         if not os.path.exists(fbx_path):
             self.report({"ERROR"}, f"找不到对应的FBX文件: {fbx_path}")
             return {"CANCELLED"}
         # 使用新函数
-        ubio_coll, main_level_coll, level_asset_coll = get_or_create_main_collections(scene_data)
+        ubio_coll, main_level_coll, level_asset_coll = get_or_create_main_collections(json_scene_data)
         ubio_coll.color_tag = Const.UECOLL_COLOR
         setup_collection_hierarchy(ubio_coll, main_level_coll, level_asset_coll)
         existing_objs = set(bpy.data.objects)
@@ -278,7 +323,7 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
             self.report({"WARNING"}, "Blender单位不是厘米，可能会导致比例不一致")
         vaild_actors = []
         level_instance_objs = [obj for obj in ubio_objs if obj.type == "EMPTY" and "LevelInstanceEditorInstanceActor" in obj.name]
-        for actor in scene_data["actors"]:
+        for actor in json_scene_data["actors"]:
             obj = bpy.data.objects.get(actor["name"])
             if obj:
                 set_actor_custom_props(obj, actor)
@@ -313,6 +358,10 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
         for obj in level_asset_coll.objects:
             if obj.type == 'EMPTY' and obj.name == Const.PROXY_PIVOT_OBJ:
                 set_proxy_pivot_properties(obj)
+
+        set_random_color_by_class(level_asset_coll.objects)
+
+
         self.report({"INFO"}, f"成功导入Unreal场景: {os.path.basename(json_path)}")
         return {"FINISHED"}
 
