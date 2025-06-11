@@ -195,7 +195,7 @@ def clear_collection_and_children(coll: bpy.types.Collection) -> None:
     bpy.data.collections.remove(coll)
 
 
-def clear_imported_scene(ubio_coll: bpy.types.Collection, main_level_coll: bpy.types.Collection, level_path_coll: bpy.types.Collection) -> None:
+def clear_imported_scene(ubio_coll: bpy.types.Collection, main_level_coll: bpy.types.Collection) -> None:
     """
     清理已导入的资源集合及其对象
     参数：
@@ -205,15 +205,22 @@ def clear_imported_scene(ubio_coll: bpy.types.Collection, main_level_coll: bpy.t
     返回：
         无
     """
-    objs_to_remove = [obj for obj in level_path_coll.objects]
+    objs_to_remove = [obj for obj in ubio_coll.all_objects]
     for obj in objs_to_remove:
         bpy.data.objects.remove(obj, do_unlink=True)
-    if level_path_coll.name in [c.name for c in main_level_coll.children]:
-        main_level_coll.children.unlink(level_path_coll)
-    if main_level_coll.name in [c.name for c in ubio_coll.children]:
-        ubio_coll.children.unlink(main_level_coll)
-    bpy.data.collections.remove(level_path_coll)
-    bpy.data.collections.remove(main_level_coll)
+    for coll in main_level_coll.children:
+        main_level_coll.children.unlink(coll)
+        bpy.data.collections.remove(coll)
+    for coll in ubio_coll.children:
+        ubio_coll.children.unlink(coll)
+        bpy.data.collections.remove(coll)
+    print("clear scene")
+    # if level_path_coll.name in [c.name for c in main_level_coll.children]:
+    #     main_level_coll.children.unlink(level_path_coll)
+    # if main_level_coll.name in [c.name for c in ubio_coll.children]:
+    #     ubio_coll.children.unlink(main_level_coll)
+    # bpy.data.collections.remove(level_path_coll)
+    # bpy.data.collections.remove(main_level_coll)
     if not ubio_coll.children:
         bpy.data.collections.remove(ubio_coll)
     bpy.ops.outliner.orphans_purge(do_local_ids=True)
@@ -244,8 +251,8 @@ def find_gpro_objs(objs):
 
 def gen_random_color():
     h = random.random()  # 色相
-    s = random.uniform(0.2, 0.7)  # 饱和度范围
-    v = random.uniform(0.5, 1.0)  # 亮度范围
+    s = random.uniform(0, 0.6)  # 饱和度范围
+    v = random.uniform(0.4, 1.0)  # 亮度范围
     
     temp_color = Color()
     temp_color.hsv = (h, s, v)
@@ -375,9 +382,9 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
             self.report({"ERROR"}, "请选择一个 .json 文件")
             return {"CANCELLED"}
         with open(json_path, "r") as f:
-            scene_data = json.load(f)
-        main_level = scene_data.get("main_level", None)
-        level_path = scene_data.get("level_path", None)
+            json_scene_data = json.load(f)
+        main_level = json_scene_data.get("main_level", None)
+        level_path = json_scene_data.get("level_path", None)
         main_level_name = get_name_from_ue_path(main_level)
         if main_level == level_path:
             level_path_name = Const.MAINLEVEL
@@ -386,8 +393,8 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
         ubio_coll = bpy.data.collections.get(Const.UECOLL)
         main_level_coll = bpy.data.collections.get(main_level_name)
         level_path_coll = bpy.data.collections.get(level_path_name)
-        if ubio_coll and main_level_coll and level_path_coll:
-            clear_imported_scene(ubio_coll, main_level_coll, level_path_coll)
+        # if ubio_coll and main_level_coll and level_path_coll:
+        clear_imported_scene(ubio_coll, main_level_coll)
         return self.execute(context)
 
 
