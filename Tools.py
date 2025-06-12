@@ -257,3 +257,15 @@ class SelectSameClassActorsOperator(bpy.types.Operator):
 
         self.report({'INFO'}, f"成功选中 {selected_count} 个具有相同 Class 的对象。")
         return {"FINISHED"}
+    
+
+
+class ActorArrayOperator(bpy.types.Operator):
+    bl_idname = "ubio.array_copy_actors"
+    bl_label = "Array Copy Actors"
+
+    def execute(self, context):
+        #TODO: 1. 参考mirror copy operator的实现。做一个array。 2. 参数a 控制array的间隔。 参数b 控制array的方向(xyz)。参数c  控制array的个数。 3. 操控：鼠标位置控制间隔， x键切换方向， 滚轮控制个数  
+
+        return {"FINISHED"}
+

@@ -205,7 +205,8 @@ def clear_imported_scene(ubio_coll: bpy.types.Collection, main_level_coll: bpy.t
     返回：
         无
     """
-    objs_to_remove = [obj for obj in ubio_coll.all_objects]
+    if ubio_coll:
+        objs_to_remove = [obj for obj in ubio_coll.all_objects]
     for obj in objs_to_remove:
         bpy.data.objects.remove(obj, do_unlink=True)
     for coll in main_level_coll.children:
@@ -393,8 +394,8 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
         ubio_coll = bpy.data.collections.get(Const.UECOLL)
         main_level_coll = bpy.data.collections.get(main_level_name)
         level_path_coll = bpy.data.collections.get(level_path_name)
-        # if ubio_coll and main_level_coll and level_path_coll:
-        clear_imported_scene(ubio_coll, main_level_coll)
+        if ubio_coll and main_level_coll:
+            clear_imported_scene(ubio_coll, main_level_coll)
         return self.execute(context)
 
 
