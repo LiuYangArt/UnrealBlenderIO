@@ -7,7 +7,6 @@ from . import util
 
 class UBIO_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__
-
     ue_project_path: bpy.props.StringProperty(
         name="UE Project Path",
         description="选择Unreal Engine工程的根目录",
