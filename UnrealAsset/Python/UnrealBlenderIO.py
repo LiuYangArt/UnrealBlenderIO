@@ -1,6 +1,3 @@
-#这是一个UE5 Python脚本， 用于再UE5下导入导出场景。
-#调用UE 5.5 python api
-
 import unreal
 import os
 import json

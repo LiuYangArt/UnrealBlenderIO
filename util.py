@@ -2,6 +2,8 @@ import bpy
 from mathutils import Vector
 from math import radians
 from math import pi
+import shutil
+import os
 # import addon_utils
 
 # =====================
@@ -253,3 +255,27 @@ def is_obj_transform_equal(obj, transform, tol=0.01):
             if not is_close(ue_transform[key][axis], transform[key][axis]):
                 return False
     return True
+
+
+def copy_unreal_assets(source_dir: str, target_dir: str):
+    """将UnrealAsset目录下的内容复制到UE工程目录下。
+    参数：
+        source_dir (str): UnrealAsset源目录的路径。
+        target_dir (str): UE工程目标目录的路径。
+    """
+    if not os.path.exists(source_dir):
+        print(f"错误: 源目录不存在: {source_dir}")
+        return
+
+    # 确保目标目录存在，如果不存在则创建
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir)
+
+    for item in os.listdir(source_dir):
+        s = os.path.join(source_dir, item)
+        d = os.path.join(target_dir, item)
+        if os.path.isdir(s):
+            shutil.copytree(s, d, dirs_exist_ok=True)
+        else:
+            shutil.copy2(s, d)
+    print(f"成功将 {source_dir} 复制到 {target_dir}")
