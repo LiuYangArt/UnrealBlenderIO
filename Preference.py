@@ -23,9 +23,9 @@ class UBIO_AddonPreferences(bpy.types.AddonPreferences):
         box = layout.box()
         box.label(text="使用说明:")
         box.label(text="1. 选择Unreal Engine工程的根目录。")
-        box.label(text="2. 点击 'Setup Unreal Project' 按钮，将所需文件复制到UE工程下。")
-        box.label(text="3. 在UE编辑器中找到UBIO\EUW_UBIO，右键运行出现导入导出界面")
-        box.label(text="4. Blender插件在右侧N面板>UBIO下")
+        box.label(text="2. 点击 'Setup Unreal Project' 按钮，将所需文件复制到UE工程下。需要UE5.5及以上版本。")
+        box.label(text="3. 在UE编辑器中找到UBIO\EUW_UBIO，右键运行出现导入导出界面。")
+        box.label(text="4. Blender插件在右侧N面板>UBIO下。")
 
 
 class UBIO_OT_CopyAssets(bpy.types.Operator):

@@ -291,11 +291,130 @@ def set_random_color_by_class(target_objs):
     bpy.context.space_data.shading.light = 'MATCAP'
     
 
+def import_json_scene(json_path: str):
+    with open(json_path, "r") as f:
+        json_scene_data = json.load(f)
 
+    fbx_path = os.path.splitext(json_path)[0] + ".fbx"
+    if not os.path.exists(fbx_path):
+        print(f"找不到对应的FBX文件: {fbx_path}")
+        return None
+    
+    ubio_coll, main_level_coll, level_asset_coll = get_or_create_main_collections(json_scene_data)
+    ubio_coll.color_tag = Const.UECOLL_COLOR
+    setup_collection_hierarchy(ubio_coll, main_level_coll, level_asset_coll)
+    existing_objs = set(bpy.data.objects)
+    bpy.ops.import_scene.fbx(
+        filepath=fbx_path,
+        use_custom_normals=True,
+        use_custom_props=False,
+        use_image_search=False,
+        use_anim=False,
+        bake_space_transform=True,
+    )
+    ubio_objs = [obj for obj in bpy.data.objects if obj not in existing_objs]
+    move_objs_to_collection(ubio_objs, level_asset_coll.name)
+
+    vaild_actors = []
+    level_instance_objs = [obj for obj in ubio_objs if obj.type == "EMPTY" and "LevelInstanceEditorInstanceActor" in obj.name]
+    for actor in json_scene_data["actors"]:
+        obj = bpy.data.objects.get(actor["name"])
+        if obj:
+            set_actor_custom_props(obj, actor)
+            is_coll_inst = False
+            is_light = False
+            if obj[Const.ACTORTYPE] in Const.COLLINST_TYPES:
+                is_coll_inst = True
+            elif obj[Const.ACTORTYPE] == "LevelInstance":
+                for inst in level_instance_objs:
+                    if obj.location == inst.location:
+                        inst.parent = obj
+                        inst.location = (0, 0, 0)
+                        inst.rotation_euler = (0, 0, 0)
+                        inst.scale = (1, 1, 1)
+                        is_coll_inst = True
+            elif "Light" in obj[Const.ACTORTYPE]:
+                is_light = True
+            else:
+                continue
+            if is_coll_inst:
+                if obj in ubio_objs:
+                    ubio_objs.remove(obj)
+                actor_obj = convert_to_actor_instance(obj)
+                vaild_actors.append(actor_obj)
+            elif is_light:
+                obj.hide_select = True
+    for obj in ubio_objs:
+        if obj.type == "EMPTY" and len(obj.children) == 0:
+            obj.hide_viewport = True
+            obj.hide_select = True
+    # 检查并设置Proxy Pivot属性
+    for obj in level_asset_coll.objects:
+        if obj.type == 'EMPTY' and obj.name == Const.PROXY_PIVOT_OBJ:
+            set_proxy_pivot_properties(obj)
+    set_random_color_by_class(level_asset_coll.objects)
+    return ubio_coll
 
 # =====================
 # 主要操作类
 # =====================
+class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
+    bl_idname = "ubio.import_latest_unreal_scene"
+    bl_label = "Import Latest Unreal Scene"
+    bl_description = "Import Latest FBX and JSON exported from Unreal Engine"
+    bl_options = {"UNDO"}
+
+    latest_json_path: bpy.props.StringProperty()
+
+    def execute(self, context):
+        json_path = self.latest_json_path
+        if not json_path or not os.path.exists(json_path):
+            self.report({"ERROR"}, "未能找到有效的JSON文件路径")
+            return {"CANCELLED"}
+
+        if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
+            self.report({"WARNING"}, "Blender单位不是厘米，可能会导致比例不一致")
+
+        ubio_collection = import_json_scene(json_path)
+        if ubio_collection is None:
+            self.report({"ERROR"}, "导入场景失败")
+            return {"CANCELLED"}
+        else:
+            self.report({"INFO"}, f"成功自动导入最新Unreal场景: {os.path.basename(json_path)}")
+        return {"FINISHED"}
+
+    def invoke(self, context, event):
+        temp_dir = Const.DEFAULT_IO_TEMP_DIR
+        if not os.path.isdir(temp_dir):
+            self.report({"ERROR"}, f"默认IO路径不存在: {temp_dir}")
+            return {"CANCELLED"}
+
+        json_files = [f for f in os.listdir(temp_dir) if f.lower().endswith('.json')]
+        if not json_files:
+            self.report({"ERROR"}, f"在 {temp_dir} 中找不到JSON文件")
+            return {"CANCELLED"}
+
+        latest_json_file = max(json_files, key=lambda f: os.path.getmtime(os.path.join(temp_dir, f)))
+        self.latest_json_path = os.path.join(temp_dir, latest_json_file)
+
+        with open(self.latest_json_path, "r") as f:
+            json_scene_data = json.load(f)
+
+        main_level = json_scene_data.get("main_level", None)
+        main_level_name = get_name_from_ue_path(main_level)
+
+        ubio_coll = bpy.data.collections.get(Const.UECOLL)
+        main_level_coll = bpy.data.collections.get(main_level_name)
+
+        if ubio_coll and main_level_coll:
+            clear_imported_scene(ubio_coll, main_level_coll)
+
+        return self.execute(context)
+
+
+
+
+
 
 class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
     bl_idname = "ubio.import_unreal_scene"
@@ -312,65 +431,15 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
         if not os.path.exists(fbx_path):
             self.report({"ERROR"}, f"找不到对应的FBX文件: {fbx_path}")
             return {"CANCELLED"}
-        # 使用新函数
-        ubio_coll, main_level_coll, level_asset_coll = get_or_create_main_collections(json_scene_data)
-        ubio_coll.color_tag = Const.UECOLL_COLOR
-        setup_collection_hierarchy(ubio_coll, main_level_coll, level_asset_coll)
-        existing_objs = set(bpy.data.objects)
-        bpy.ops.import_scene.fbx(
-            filepath=fbx_path,
-            use_custom_normals=True,
-            use_custom_props=False,
-            use_image_search=False,
-            use_anim=False,
-            bake_space_transform=True,
-        )
-        ubio_objs = [obj for obj in bpy.data.objects if obj not in existing_objs]
-        move_objs_to_collection(ubio_objs, level_asset_coll.name)
         if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
             self.report({"WARNING"}, "Blender单位不是厘米，可能会导致比例不一致")
-        vaild_actors = []
-        level_instance_objs = [obj for obj in ubio_objs if obj.type == "EMPTY" and "LevelInstanceEditorInstanceActor" in obj.name]
-        for actor in json_scene_data["actors"]:
-            obj = bpy.data.objects.get(actor["name"])
-            if obj:
-                set_actor_custom_props(obj, actor)
-                is_coll_inst = False
-                is_light = False
-                if obj[Const.ACTORTYPE] in Const.COLLINST_TYPES:
-                    is_coll_inst = True
-                elif obj[Const.ACTORTYPE] == "LevelInstance":
-                    for inst in level_instance_objs:
-                        if obj.location == inst.location:
-                            inst.parent = obj
-                            inst.location = (0, 0, 0)
-                            inst.rotation_euler = (0, 0, 0)
-                            inst.scale = (1, 1, 1)
-                            is_coll_inst = True
-                elif "Light" in obj[Const.ACTORTYPE]:
-                    is_light = True
-                else:
-                    continue
-                if is_coll_inst:
-                    if obj in ubio_objs:
-                        ubio_objs.remove(obj)
-                    actor_obj = convert_to_actor_instance(obj)
-                    vaild_actors.append(actor_obj)
-                elif is_light:
-                    obj.hide_select = True
-        for obj in ubio_objs:
-            if obj.type == "EMPTY" and len(obj.children) == 0:
-                obj.hide_viewport = True
-                obj.hide_select = True
-        # 检查并设置Proxy Pivot属性
-        for obj in level_asset_coll.objects:
-            if obj.type == 'EMPTY' and obj.name == Const.PROXY_PIVOT_OBJ:
-                set_proxy_pivot_properties(obj)
-
-        set_random_color_by_class(level_asset_coll.objects)
-
-
-        self.report({"INFO"}, f"成功导入Unreal场景: {os.path.basename(json_path)}")
+        # 使用新函数
+        ubio_collection=import_json_scene(json_path)
+        if ubio_collection is None:
+            self.report({"ERROR"}, "导入场景失败")
+            return {"CANCELLED"}
+        else:      
+            self.report({"INFO"}, f"成功导入Unreal场景: {os.path.basename(json_path)}")
         return {"FINISHED"}
 
     def invoke(self, context, event):

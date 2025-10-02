@@ -56,6 +56,8 @@ class UBIOToolPanel(bpy.types.Panel):
         box_column = box.column()
         box_column.label(text="Unreal Blender IO")
         box_column.prop(parameters, "ubio_json_path", text="Path")
+        
+        box_column.operator("ubio.import_latest_unreal_scene", icon="IMPORT")
         box_column.operator("ubio.import_unreal_scene", icon="IMPORT")
         box_column.operator("ubio.export_unreal_scene_json", icon="EXPORT")
         box_column.operator("ubio.clean_tempfiles", icon="FILE_REFRESH")
