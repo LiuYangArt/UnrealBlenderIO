@@ -292,6 +292,7 @@ def set_random_color_by_class(target_objs):
     
 
 def import_json_scene(json_path: str):
+    print(f"导入JSON场景: {json_path}")
     with open(json_path, "r") as f:
         json_scene_data = json.load(f)
 
@@ -372,18 +373,18 @@ class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
             self.report({"ERROR"}, "未能找到有效的JSON文件路径")
             return {"CANCELLED"}
         params = context.scene.ubio_params
-        params.ubio_json_path = json_path
+        params.ubio_json_path = json_path # UI路径修改时自动触发导入
 
 
-        if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
-            self.report({"WARNING"}, "Blender单位不是厘米，可能会导致比例不一致")
+        # if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
+        #     self.report({"WARNING"}, "Blender单位不是厘米，可能会导致比例不一致")
 
-        ubio_collection = import_json_scene(json_path)
-        if ubio_collection is None:
-            self.report({"ERROR"}, "导入场景失败")
-            return {"CANCELLED"}
-        else:
-            self.report({"INFO"}, f"成功自动导入最新Unreal场景: {os.path.basename(json_path)}")
+        # # ubio_collection = import_json_scene(json_path)
+        # # if ubio_collection is None:
+        # #     self.report({"ERROR"}, "导入场景失败")
+        # #     return {"CANCELLED"}
+        # else:
+        self.report({"INFO"}, f"成功自动导入最新Unreal场景: {os.path.basename(json_path)}")
         return {"FINISHED"}
 
     def invoke(self, context, event):
