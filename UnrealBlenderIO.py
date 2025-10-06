@@ -371,6 +371,9 @@ class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
         if not json_path or not os.path.exists(json_path):
             self.report({"ERROR"}, "未能找到有效的JSON文件路径")
             return {"CANCELLED"}
+        params = context.scene.ubio_params
+        params.ubio_json_path = json_path
+
 
         if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
             self.report({"WARNING"}, "Blender单位不是厘米，可能会导致比例不一致")
