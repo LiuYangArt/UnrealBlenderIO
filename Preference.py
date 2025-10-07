@@ -51,7 +51,7 @@ class UBIO_OT_CopyAssets(bpy.types.Operator):
         unreal_asset_source_dir = os.path.join(current_dir, "UnrealAsset")
 
         # 复制到Content/UBIO
-        target_ubio_dir = os.path.join(ue_project_path, "Content", "UBIO")
+        target_ubio_dir = os.path.join(ue_project_path, "Content")
         util.copy_unreal_assets(unreal_asset_source_dir, target_ubio_dir)
 
         # 复制到Content/Python (假设UnrealAsset中包含Python目录)
