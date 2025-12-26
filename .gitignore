@@ -1,0 +1,11 @@
+__pycache__
+
+__pycache__/**
+**.blend1
+makerelease.bat
+*.bat
+_backup/**
+.clinerules/*
+.cursor/*
+memory-bank/*
+*.code-workspace
