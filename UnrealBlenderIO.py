@@ -241,13 +241,15 @@ def find_gpro_objs(objs):
             for mod in obj.modifiers:
                 if mod.type == 'NODES' and mod.node_group:
                     if mod.node_group.name == "GPro_Instance" or mod.node_group.name == "CAT_MeshGroup":
-                        # 查找名为 "Instanced Collection" 的输入
-                        for input_socket in mod.node_group.inputs:
-                            if input_socket.name == "Instanced Collection" and input_socket.type == 'COLLECTION':
-                                # 获取引用的集合
-                                if input_socket.default_value:
-                                    collection = input_socket.default_value
-                                    gpro_instances.extend(collection.all_objects)
+                        # Blender 4.0+ 使用 interface.items_tree 访问节点组输入
+                        for item in mod.node_group.interface.items_tree:
+                            if item.item_type == 'SOCKET' and item.in_out == 'INPUT':
+                                if item.name == "Instanced Collection" and item.socket_type == 'NodeSocketCollection':
+                                    # 通过 modifier 属性访问集合值
+                                    socket_id = item.identifier
+                                    if socket_id in mod and mod[socket_id]:
+                                        collection = mod[socket_id]
+                                        gpro_instances.extend(collection.all_objects)
     return gpro_instances
 
 def gen_random_color():
