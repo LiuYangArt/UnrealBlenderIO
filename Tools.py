@@ -5,7 +5,7 @@ from bpy.props import EnumProperty
 from .util import (Const,find_level_asset_coll, set_proxy_pivot_properties, get_transform_from_obj, set_actor_transform
 )
 
-class UBIOAddProxyPivotOperator(bpy.types.Operator):
+class UBIO_OT_AddProxyPivot(bpy.types.Operator):
     bl_idname = "ubio.add_proxy_pivot"
     bl_label = "Set Proxy Pivot"
     bl_options = {'REGISTER', 'UNDO'}
@@ -40,7 +40,7 @@ class UBIOAddProxyPivotOperator(bpy.types.Operator):
         self.report({"INFO"}, "已添加Proxy Pivot到Level Asset Collection")
         return {"FINISHED"}
 
-class UBIOMirrorCopyActorsOperator(bpy.types.Operator):
+class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
     bl_idname = "ubio.mirror_copy_actors"
     bl_label = "Mirror Copy Actors"
     bl_options = {'REGISTER', 'UNDO'}
@@ -218,7 +218,7 @@ class UBIOMirrorCopyActorsOperator(bpy.types.Operator):
 
 
 
-class SelectSameClassActorsOperator(bpy.types.Operator):
+class UBIO_OT_SelectSameClassActors(bpy.types.Operator):
     bl_idname = "ubio.select_same_class_actors"
     bl_label = "Select Same Class Actors"
     bl_description  = "批量选择同样class的对象"
@@ -261,7 +261,7 @@ class SelectSameClassActorsOperator(bpy.types.Operator):
     
 
 
-class ActorArrayOperator(bpy.types.Operator):
+class UBIO_OT_ArrayCopyActors(bpy.types.Operator):
     bl_idname = "ubio.array_copy_actors"
     bl_label = "Array Copy Actors"
 

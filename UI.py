@@ -18,7 +18,7 @@ def run_import_json_op(self, context):
     bpy.ops.ubio.import_unreal_scene("INVOKE_DEFAULT")
 
 
-class UIParams(PropertyGroup):
+class UBIO_PG_Params(PropertyGroup):
     """UI参数"""
     ubio_json_path: StringProperty(
         name="UBIO JSON Path",
@@ -41,7 +41,7 @@ class UIParams(PropertyGroup):
     )
         
 
-class UBIOToolPanel(bpy.types.Panel):
+class UBIO_PT_ToolPanel(bpy.types.Panel):
     bl_idname = "UBIO_PT_tool_panel"
     bl_label = "Unreal Blender IO"
     bl_category = "UBIO"  # Custom tab name

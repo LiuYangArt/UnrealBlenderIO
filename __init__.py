@@ -13,14 +13,14 @@
 import bpy
 from . import auto_load
 from bpy.props import PointerProperty
-from .UI import UIParams
+from .UI import UBIO_PG_Params
 
 auto_load.init()
 
 
 def register():
     auto_load.register()
-    bpy.types.Scene.ubio_params = PointerProperty(type=UIParams)
+    bpy.types.Scene.ubio_params = PointerProperty(type=UBIO_PG_Params)
 
 
 def unregister():
