@@ -1,0 +1,62 @@
+name: Release Plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare and Zip Plugin
+        run: |
+          # Extract version from tag (e.g., v1.0.0 -> 1.0.0)
+          VERSION=${GITHUB_REF_NAME#v}
+          ZIP_NAME="UBIO_${VERSION}.zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+          # Create staging directory
+          mkdir -p build_staging/UBIO
+
+          # Copy plugin files (excluding development files)
+          rsync -av --progress . build_staging/UBIO/ \
+            --exclude 'Addon' \
+            --exclude '.git' \
+            --exclude '.gitignore' \
+            --exclude '.github' \
+            --exclude '.agent' \
+            --exclude '.cursor' \
+            --exclude '.clinerules' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '*.blend1' \
+            --exclude '*_backup' \
+            --exclude 'memory-bank' \
+            --exclude 'build_staging' \
+            --exclude 'versions.bat' \
+            --exclude 'new_version.bat' \
+            --exclude 'publish_release.bat' \
+            --exclude 'version_manager.py' \
+            --exclude '*.zip' \
+            --exclude '*.code-workspace'
+
+          # Zip the folder
+          cd build_staging
+          zip -r "../$ZIP_NAME" UBIO
+          cd ..
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ${{ env.ZIP_NAME }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
