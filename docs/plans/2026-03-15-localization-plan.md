@@ -163,32 +163,32 @@ UnrealBlenderIO/
 
 ### Phase 1：建立 i18n 基础设施
 
-- [ ] 新建 `i18n/` 目录与两份语言 JSON 文件
-- [ ] 新建 `i18n.py`，实现：
+- [x] 新建 `i18n/` 目录与两份语言 JSON 文件
+- [x] 新建 `i18n.py`，实现：
   - JSON 加载
   - key 完整性校验（两份语言 key 必须一致）
   - `tr(key, **kwargs)` 接口
   - Blender 翻译注册与卸载接口
-- [ ] 在 `__init__.py` 接入注册/卸载
+- [x] 在 `__init__.py` 接入注册/卸载
 
 ### Phase 2：统一替换可见文案
 
-- [ ] `UI.py` 全量替换为 key 引用
-- [ ] `Tools.py` 全量替换为 key 引用
-- [ ] `UnrealBlenderIO.py` 全量替换为 key 引用
-- [ ] `Preference.py` 全量替换为 key 引用
+- [x] `UI.py` 全量替换为 key 引用
+- [x] `Tools.py` 全量替换为 key 引用
+- [x] `UnrealBlenderIO.py` 全量替换为 key 引用
+- [x] `Preference.py` 全量替换为 key 引用
 
 ### Phase 3：校验与修正
 
-- [ ] 运行词条一致性检查（缺 key 直接报错）
-- [ ] 检查格式化占位符一致性（如 `{filename}`）
-- [ ] 检查拼写与术语统一（Unreal / Blender / Level Asset 等）
+- [x] 运行词条一致性检查（缺 key 直接报错）
+- [x] 检查格式化占位符一致性（如 `{filename}`）
+- [x] 检查拼写与术语统一（Unreal / Blender / Level Asset 等）
 
 ### Phase 4：验收与文档
 
 - [ ] 完成中英文切换手测
-- [ ] 在 `README.md` 补充“语言跟随 Blender 设置”的说明
-- [ ] 记录后续新增文案的开发规范（新增文案必须先进 JSON）
+- [x] 在 `README.md` 补充“语言跟随 Blender 设置”的说明
+- [x] 记录后续新增文案的开发规范（新增文案必须先进 JSON）
 
 ## 5. 验收标准
 
@@ -258,4 +258,3 @@ UnrealBlenderIO/
 2. Blender 场景下，`bl_label/bl_description` 和运行时 `report` 是两类不同文本入口，必须分别覆盖。
 3. “中英文 JSON 分离”与“跟随 Blender 自动切换”并不冲突，关键在于把 JSON 与 Blender 翻译注册流程打通。
 4. 本轮坚持最小范围改造：只动 Blender 插件侧可见文本，不改业务流程，不引入额外依赖。
-

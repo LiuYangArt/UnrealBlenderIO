@@ -14,20 +14,20 @@ import bpy
 from . import auto_load
 from bpy.props import PointerProperty
 from .UI import UBIO_PG_Params
+from .i18n import register_translations, unregister_translations
 
 auto_load.init()
 
 
 def register():
+    register_translations()
     auto_load.register()
     bpy.types.Scene.ubio_params = PointerProperty(type=UBIO_PG_Params)
 
 
 def unregister():
+    if hasattr(bpy.types.Scene, "ubio_params"):
+        del bpy.types.Scene.ubio_params
     auto_load.unregister()
-    del bpy.types.Scene.ubio_params
-
-
-auto_load.init()
-
+    unregister_translations()
 

@@ -15,6 +15,7 @@ from .util import (
     # is_obj_transform_equal,
     Const
 )
+from .i18n import msgid, tr
 # from .Toolsl import UBIOAddProxyPivotOperator, UBIOMirrorCopyActorsOperator
 
 
@@ -215,7 +216,7 @@ def clear_imported_scene(ubio_coll: bpy.types.Collection, main_level_coll: bpy.t
     for coll in ubio_coll.children:
         ubio_coll.children.unlink(coll)
         bpy.data.collections.remove(coll)
-    print("clear scene")
+    print(tr("log.clear_scene"))
     # if level_path_coll.name in [c.name for c in main_level_coll.children]:
     #     main_level_coll.children.unlink(level_path_coll)
     # if main_level_coll.name in [c.name for c in ubio_coll.children]:
@@ -294,13 +295,13 @@ def set_random_color_by_class(target_objs):
     
 
 def import_json_scene(json_path: str):
-    print(f"导入JSON场景: {json_path}")
+    print(tr("log.import_json_scene", path=json_path))
     with open(json_path, "r") as f:
         json_scene_data = json.load(f)
 
     fbx_path = os.path.splitext(json_path)[0] + ".fbx"
     if not os.path.exists(fbx_path):
-        print(f"找不到对应的FBX文件: {fbx_path}")
+        print(tr("log.fbx_not_found", path=fbx_path))
         return None
     
     ubio_coll, main_level_coll, level_asset_coll = get_or_create_main_collections(json_scene_data)
@@ -318,7 +319,6 @@ def import_json_scene(json_path: str):
     ubio_objs = [obj for obj in bpy.data.objects if obj not in existing_objs]
     move_objs_to_collection(ubio_objs, level_asset_coll.name)
 
-    vaild_actors = []
     level_instance_objs = [obj for obj in ubio_objs if obj.type == "EMPTY" and "LevelInstanceEditorInstanceActor" in obj.name]
     for actor in json_scene_data["actors"]:
         obj = bpy.data.objects.get(actor["name"])
@@ -343,8 +343,7 @@ def import_json_scene(json_path: str):
             if is_coll_inst:
                 if obj in ubio_objs:
                     ubio_objs.remove(obj)
-                actor_obj = convert_to_actor_instance(obj)
-                vaild_actors.append(actor_obj)
+                convert_to_actor_instance(obj)
             elif is_light:
                 obj.hide_select = True
     for obj in ubio_objs:
@@ -363,8 +362,8 @@ def import_json_scene(json_path: str):
 # =====================
 class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
     bl_idname = "ubio.import_latest_unreal_scene"
-    bl_label = "Import Latest Unreal Scene"
-    bl_description = "Import Latest FBX and JSON exported from Unreal Engine"
+    bl_label = msgid("op.import_latest.label")
+    bl_description = msgid("op.import_latest.desc")
     bl_options = {"UNDO"}
 
     latest_json_path: bpy.props.StringProperty()
@@ -372,7 +371,7 @@ class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
     def execute(self, context):
         json_path = self.latest_json_path
         if not json_path or not os.path.exists(json_path):
-            self.report({"ERROR"}, "未能找到有效的JSON文件路径")
+            self.report({"ERROR"}, tr("report.import_latest.invalid_json_path"))
             return {"CANCELLED"}
         params = context.scene.ubio_params
         params.ubio_json_path = json_path # UI路径修改时自动触发导入
@@ -386,18 +385,21 @@ class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
         # #     self.report({"ERROR"}, "导入场景失败")
         # #     return {"CANCELLED"}
         # else:
-        self.report({"INFO"}, f"成功自动导入最新Unreal场景: {os.path.basename(json_path)}")
+        self.report(
+            {"INFO"},
+            tr("report.import_latest.success", filename=os.path.basename(json_path)),
+        )
         return {"FINISHED"}
 
     def invoke(self, context, event):
         temp_dir = Const.DEFAULT_IO_TEMP_DIR
         if not os.path.isdir(temp_dir):
-            self.report({"ERROR"}, f"默认IO路径不存在: {temp_dir}")
+            self.report({"ERROR"}, tr("report.import_latest.default_dir_missing", path=temp_dir))
             return {"CANCELLED"}
 
         json_files = [f for f in os.listdir(temp_dir) if f.lower().endswith('.json')]
         if not json_files:
-            self.report({"ERROR"}, f"在 {temp_dir} 中找不到JSON文件")
+            self.report({"ERROR"}, tr("report.import_latest.no_json_in_dir", path=temp_dir))
             return {"CANCELLED"}
 
         latest_json_file = max(json_files, key=lambda f: os.path.getmtime(os.path.join(temp_dir, f)))
@@ -424,8 +426,8 @@ class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
 
 class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
     bl_idname = "ubio.import_unreal_scene"
-    bl_label = "Import Unreal Scene"
-    bl_description = "Import FBX and JSON exported from Unreal Engine"
+    bl_label = msgid("op.import_scene.label")
+    bl_description = msgid("op.import_scene.desc")
     bl_options = {"UNDO"}
 
     def execute(self, context):
@@ -435,27 +437,27 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
             json_scene_data = json.load(f)
         fbx_path = os.path.splitext(json_path)[0] + ".fbx"
         if not os.path.exists(fbx_path):
-            self.report({"ERROR"}, f"找不到对应的FBX文件: {fbx_path}")
+            self.report({"ERROR"}, tr("report.import_scene.fbx_not_found", path=fbx_path))
             return {"CANCELLED"}
         if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
-            self.report({"WARNING"}, "Blender单位不是厘米，可能会导致比例不一致")
+            self.report({"WARNING"}, tr("report.import_scene.unit_not_cm"))
         # 使用新函数
         ubio_collection=import_json_scene(json_path)
         if ubio_collection is None:
-            self.report({"ERROR"}, "导入场景失败")
+            self.report({"ERROR"}, tr("report.import_scene.failed"))
             return {"CANCELLED"}
         else:      
-            self.report({"INFO"}, f"成功导入Unreal场景: {os.path.basename(json_path)}")
+            self.report({"INFO"}, tr("report.import_scene.success", filename=os.path.basename(json_path)))
         return {"FINISHED"}
 
     def invoke(self, context, event):
         params = context.scene.ubio_params
         json_path = params.ubio_json_path
         if not os.path.exists(json_path):
-            self.report({"ERROR"}, f"找不到JSON文件: {json_path}")
+            self.report({"ERROR"}, tr("report.import_scene.json_not_found", path=json_path))
             return {"CANCELLED"}
         if not json_path.lower().endswith(".json"):
-            self.report({"ERROR"}, "请选择一个 .json 文件")
+            self.report({"ERROR"}, tr("report.import_scene.json_ext_invalid"))
             return {"CANCELLED"}
         with open(json_path, "r") as f:
             json_scene_data = json.load(f)
@@ -468,7 +470,6 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
             level_path_name = get_name_from_ue_path(level_path)
         ubio_coll = bpy.data.collections.get(Const.UECOLL)
         main_level_coll = bpy.data.collections.get(main_level_name)
-        level_path_coll = bpy.data.collections.get(level_path_name)
         if ubio_coll and main_level_coll:
             clear_imported_scene(ubio_coll, main_level_coll)
         return self.execute(context)
@@ -477,8 +478,8 @@ class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
 
 class UBIO_OT_ExportUnrealJSON(bpy.types.Operator):
     bl_idname = "ubio.export_unreal_scene_json"
-    bl_label = "Export Unreal Scene JSON"
-    bl_description = "Export Unreal Scene JSON"
+    bl_label = msgid("op.export_json.label")
+    bl_description = msgid("op.export_json.desc")
     bl_options = {"UNDO"}
 
     def execute(self, context):
@@ -487,7 +488,7 @@ class UBIO_OT_ExportUnrealJSON(bpy.types.Operator):
 
         # 检查json文件是否存在
         if not os.path.exists(json_path):
-            self.report({"ERROR"}, f"找不到JSON文件: {json_path}")
+            self.report({"ERROR"}, tr("report.export_json.json_not_found", path=json_path))
             return {"CANCELLED"}
         
         # 解析JSON文件
@@ -497,7 +498,7 @@ class UBIO_OT_ExportUnrealJSON(bpy.types.Operator):
         # 找到UECOLL下的collection
         ubio_coll = bpy.data.collections.get(Const.UECOLL)
         if not ubio_coll:
-            self.report({"ERROR"}, f"找不到集合: {Const.UECOLL}")
+            self.report({"ERROR"}, tr("report.export_json.collection_not_found", name=Const.UECOLL))
             return {"CANCELLED"}
 
         # 找到UECOLL的子collection（level_asset_coll），以及main_level
@@ -530,12 +531,12 @@ class UBIO_OT_ExportUnrealJSON(bpy.types.Operator):
                 if level_asset_coll.name==level_name:
                     is_match_json = True
         if not is_match_json:
-            self.report({'WARNING'}, "当前场景与ubio JSON不匹配")
+            self.report({'WARNING'}, tr("report.export_json.scene_not_match"))
             return {"CANCELLED"}
 
         # 获取level_asset_coll下的所有对象
         if level_asset_coll is None:
-            self.report({'ERROR'}, "未找到Level Asset Collection")
+            self.report({'ERROR'}, tr("report.export_json.level_asset_not_found"))
             return {"CANCELLED"}
         level_actor_objs = [obj for obj in level_asset_coll.all_objects]
         # 找出所有有 fname 的 object，且在 json 中没有对应的
@@ -597,14 +598,14 @@ class UBIO_OT_ExportUnrealJSON(bpy.types.Operator):
         with open(json_path, "w") as f:
             json.dump(scene_data, f, indent=4)
 
-        self.report({"INFO"}, "已同步Blender对象变换到JSON文件")
+        self.report({"INFO"}, tr("report.export_json.sync_done"))
         return {"FINISHED"}
 
 
 class UBIO_OT_CleanTempFiles(bpy.types.Operator):
     bl_idname = "ubio.clean_tempfiles"
-    bl_label = "Clean UBIO Temp-Files"
-    bl_description = "Clean UBIO Temp Files"
+    bl_label = msgid("op.clean_temp.label")
+    bl_description = msgid("op.clean_temp.desc")
 
     def execute(self, context):
         params = context.scene.ubio_params
@@ -614,7 +615,7 @@ class UBIO_OT_CleanTempFiles(bpy.types.Operator):
             file_path = os.path.join(dir_path, file)
             if os.path.isfile(file_path):
                 os.remove(file_path)
-        self.report({"INFO"}, f"已清理UBIO临时文件: {dir_path}") 
+        self.report({"INFO"}, tr("report.clean_temp.done", path=dir_path))
         
         return {"FINISHED"}
 

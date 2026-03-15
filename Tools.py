@@ -2,21 +2,27 @@ import bpy
 import blf
 from mathutils import Vector
 from bpy.props import EnumProperty
-from .util import (Const,find_level_asset_coll, set_proxy_pivot_properties, get_transform_from_obj, set_actor_transform
+from .util import (
+    Const,
+    find_level_asset_coll,
+    set_proxy_pivot_properties,
+    get_transform_from_obj,
+    set_actor_transform,
 )
+from .i18n import msgid, tr
 
 class UBIO_OT_AddProxyPivot(bpy.types.Operator):
     bl_idname = "ubio.add_proxy_pivot"
-    bl_label = "Set Proxy Pivot"
+    bl_label = msgid("op.add_proxy_pivot.label")
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "为选中的对象添加Proxy Pivot"
+    bl_description = msgid("op.add_proxy_pivot.desc")
     def execute(self, context):
         ubio_coll = bpy.data.collections.get(Const.UECOLL)
         level_asset_coll = None
         if ubio_coll:
             level_asset_coll = find_level_asset_coll(Const.UECOLL, 'Level')
         if not level_asset_coll:
-            self.report({"ERROR"}, "未找到Level Asset Collection")
+            self.report({"ERROR"}, tr("report.tools.level_asset_not_found"))
             return {"CANCELLED"}
         active_obj = context.active_object
         has_pivot = False
@@ -37,17 +43,17 @@ class UBIO_OT_AddProxyPivot(bpy.types.Operator):
             level_asset_coll.objects.link(pivot)
             set_proxy_pivot_properties(pivot)
         pivot.select_set(True)
-        self.report({"INFO"}, "已添加Proxy Pivot到Level Asset Collection")
+        self.report({"INFO"}, tr("report.tools.proxy_pivot_added"))
         return {"FINISHED"}
 
 class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
     bl_idname = "ubio.mirror_copy_actors"
-    bl_label = "Mirror Copy Actors"
+    bl_label = msgid("op.mirror_copy_actors.label")
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "镜像复制选中的对象，以Proxy Pivot为轴"
+    bl_description = msgid("op.mirror_copy_actors.desc")
 
     mirror_axis: EnumProperty(
-        name="Mirror Axis",
+        name=msgid("prop.mirror_axis.name"),
         items=[
             ("X", "X", "X"),
             ("Y", "Y", "Y"),
@@ -59,14 +65,14 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
     def invoke(self, context, event):
         self.selected_objs = [obj for obj in context.selected_objects if Const.FNAME in obj]
         if not self.selected_objs:
-            self.report({'WARNING'}, '未选中任何actor对象（缺少ue_fname属性）')
+            self.report({'WARNING'}, tr("report.tools.no_actor_selected"))
             return {'CANCELLED'}
         ubio_coll = bpy.data.collections.get(Const.UECOLL)
         self.level_asset_coll = None
         if ubio_coll:
             self.level_asset_coll = find_level_asset_coll(Const.UECOLL, 'Level')
         if not self.level_asset_coll:
-            self.report({'ERROR'}, '未找到Level Asset Collection')
+            self.report({'ERROR'}, tr("report.tools.level_asset_not_found"))
             return {'CANCELLED'}
         self.proxy_pivot = None
         for obj in self.level_asset_coll.objects:
@@ -74,7 +80,7 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
                 self.proxy_pivot = obj
                 break
         if not self.proxy_pivot:
-            self.report({'ERROR'}, '未找到Proxy Pivot（Pivot）')
+            self.report({'ERROR'}, tr("report.tools.proxy_pivot_not_found"))
             return {'CANCELLED'}
         self._axis = 'X'  # 默认X轴
         self.mirrored_objs = []
@@ -83,7 +89,7 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
             self._draw_callback, (context,), 'WINDOW', 'POST_PIXEL'
         )
         context.window_manager.modal_handler_add(self)
-        self.report({'INFO'}, "连续按 X 或Shift+鼠标滚轮切换镜像轴")
+        self.report({'INFO'}, tr("report.tools.mirror_axis_switch_hint"))
         return {'RUNNING_MODAL'}
 
     def modal(self, context, event):
@@ -98,9 +104,9 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
             current_idx = axis_order.index(self._axis)
             next_idx = (current_idx + 1) % 3
             self._axis = axis_order[next_idx]
-            self._remove_mirrored(context)
+            self._remove_mirrored()
             self._do_mirror(context, self._axis)
-            self.report({'INFO'}, f"当前镜像轴: {self._axis}")
+            self.report({'INFO'}, tr("report.tools.current_mirror_axis", axis=self._axis))
             return {'RUNNING_MODAL'}
         elif event.shift and event.type in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}:
             axis_order = ['X', 'Y', 'Z']
@@ -110,9 +116,9 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
             else:
                 next_idx = (current_idx - 1 + 3) % 3
             self._axis = axis_order[next_idx]
-            self._remove_mirrored(context)
+            self._remove_mirrored()
             self._do_mirror(context, self._axis)
-            self.report({'INFO'}, f"当前镜像轴: {self._axis}")
+            self.report({'INFO'}, tr("report.tools.current_mirror_axis", axis=self._axis))
             return {'RUNNING_MODAL'}
         elif event.type in {'RET', 'NUMPAD_ENTER', 'SPACE', 'RIGHTMOUSE'} and event.value == 'PRESS':
             self._remove_draw_handle()
@@ -123,12 +129,12 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
             context.view_layer.update()
             bpy.ops.wm.redraw_timer(type='DRAW_WIN', iterations=1)
             self.mirrored_objs = []
-            self.report({'INFO'}, f"完成{self._axis}轴镜像复制")
+            self.report({'INFO'}, tr("report.tools.mirror_done", axis=self._axis))
             return {'FINISHED'}
         elif event.type == 'ESC':
             self._remove_draw_handle()
-            self._remove_mirrored(context)
-            self.report({'INFO'}, "已撤销镜像")
+            self._remove_mirrored()
+            self.report({'INFO'}, tr("report.tools.mirror_cancelled"))
             return {'CANCELLED'}
         return {'RUNNING_MODAL'}
 
@@ -137,11 +143,11 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
         blf.size(font_id, 18)
         blf.color(font_id, 0.8, 0.8, 0.8, 0.8)
         blf.position(font_id, 60, 80, 0)
-        blf.draw(font_id, "连续按 X 或Shift+鼠标滚轮切换镜像轴")
+        blf.draw(font_id, tr("hint.tools.mirror_switch_axis"))
         blf.position(font_id, 60, 60, 0)
-        blf.draw(font_id, "空格 / Enter / 右键 确认")
+        blf.draw(font_id, tr("hint.tools.confirm"))
         blf.position(font_id, 60, 40, 0)
-        blf.draw(font_id, "ESC 取消")
+        blf.draw(font_id, tr("hint.tools.cancel"))
 
     def _remove_draw_handle(self):
         if hasattr(self, '_draw_handle') and self._draw_handle:
@@ -157,7 +163,7 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
         elif axis == 'Z':
             mirror_vec[2] = -1
         else:
-            self.report({'ERROR'}, f'未知镜像轴: {axis}')
+            self.report({'ERROR'}, tr("report.tools.unknown_mirror_axis", axis=axis))
             return
         self.mirrored_objs = []
         for obj in self.selected_objs:
@@ -210,7 +216,7 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
         for obj in self.selected_objs:
             o.select_set(True)
 
-    def _remove_mirrored(self, context):
+    def _remove_mirrored(self):
         for obj in self.mirrored_objs:
             if obj.name in bpy.data.objects:
                 bpy.data.objects.remove(obj, do_unlink=True)
@@ -220,20 +226,27 @@ class UBIO_OT_MirrorCopyActors(bpy.types.Operator):
 
 class UBIO_OT_SelectSameClassActors(bpy.types.Operator):
     bl_idname = "ubio.select_same_class_actors"
-    bl_label = "Select Same Class Actors"
-    bl_description  = "批量选择同样class的对象"
+    bl_label = msgid("op.select_same_class.label")
+    bl_description  = msgid("op.select_same_class.desc")
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
 
         selected_obj = context.active_object
         if not selected_obj:
-            self.report({'WARNING'}, "请先选择一个对象。")
+            self.report({'WARNING'}, tr("report.tools.select_need_active"))
             return {'CANCELLED'}
 
         # 检查选中对象是否具有ACTORCLASS属性
         if Const.ACTORCLASS not in selected_obj:
-            self.report({'WARNING'}, f"选中的对象 '{selected_obj.name}' 没有 '{Const.ACTORCLASS}' 属性。")
+            self.report(
+                {'WARNING'},
+                tr(
+                    "report.tools.select_missing_actorclass",
+                    name=selected_obj.name,
+                    prop=Const.ACTORCLASS,
+                ),
+            )
             return {'CANCELLED'}
 
         target_actor_class = selected_obj[Const.ACTORCLASS]
@@ -241,7 +254,7 @@ class UBIO_OT_SelectSameClassActors(bpy.types.Operator):
         # 查找Level Asset集合
         level_asset_coll = find_level_asset_coll(Const.UECOLL, Const.COLL_LEVEL)
         if not level_asset_coll:
-            self.report({'WARNING'}, "未找到 Level Asset Collection。请确保场景中存在UnrealIO/Level集合。")
+            self.report({'WARNING'}, tr("report.tools.select_level_asset_not_found"))
             return {'CANCELLED'}
 
         # 清除所有选中
@@ -256,14 +269,14 @@ class UBIO_OT_SelectSameClassActors(bpy.types.Operator):
         # 重新激活原选中对象
         context.view_layer.objects.active = selected_obj
 
-        self.report({'INFO'}, f"成功选中 {selected_count} 个具有相同 Class 的对象。")
+        self.report({'INFO'}, tr("report.tools.select_same_class_done", count=selected_count))
         return {"FINISHED"}
     
 
 
 class UBIO_OT_ArrayCopyActors(bpy.types.Operator):
     bl_idname = "ubio.array_copy_actors"
-    bl_label = "Array Copy Actors"
+    bl_label = msgid("op.array_copy.label")
 
     def execute(self, context):
         #TODO: 1. 参考mirror copy operator的实现。做一个array。 2. 参数a 控制array的间隔。 参数b 控制array的方向(xyz)。参数c  控制array的个数。 3. 操控：鼠标位置控制间隔， x键切换方向， 滚轮控制个数  
