@@ -87,6 +87,7 @@
   "report.export_json.level_asset_not_found": "未找到 Level Asset Collection",
   "report.export_json.sync_done": "已同步 Blender 对象变换到 JSON 文件",
   "op.clean_temp.label": "清理 UBIO 临时文件",
-  "op.clean_temp.desc": "清理 UBIO 临时文件",
-  "report.clean_temp.done": "已清理 UBIO 临时文件: {path}"
+  "op.clean_temp.desc": "清理 UBIO 临时目录下的全部文件",
+  "report.clean_temp.done": "已清理 UBIO 临时目录: {path}（删除 {count} 个条目）",
+  "report.clean_temp.failed": "清理 UBIO 临时目录失败: {path}（{error}）"
 }

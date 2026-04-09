@@ -10,24 +10,61 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
+import atexit
 import bpy
 from . import auto_load
+from bpy.app.handlers import persistent
 from bpy.props import PointerProperty
 from .UI import UBIO_PG_Params
 from .i18n import register_translations, unregister_translations
+from .util import clean_ubio_temp_dir
 
 auto_load.init()
+
+
+@persistent
+def _cleanup_ubio_temp_on_exit(*_args) -> None:
+    try:
+        dir_path, removed_count = clean_ubio_temp_dir()
+        print(
+            f"[UBIO] Cleaned temp directory on Blender exit: {dir_path} "
+            f"({removed_count} entries removed)"
+        )
+    except Exception as exc:
+        print(f"[UBIO] Failed to clean temp directory on Blender exit: {exc}")
+
+
+def _register_exit_handler() -> None:
+    handlers = getattr(bpy.app.handlers, "exit_pre", None)
+    if handlers is not None:
+        if _cleanup_ubio_temp_on_exit not in handlers:
+            handlers.append(_cleanup_ubio_temp_on_exit)
+        return
+
+    atexit.unregister(_cleanup_ubio_temp_on_exit)
+    atexit.register(_cleanup_ubio_temp_on_exit)
+
+
+def _unregister_exit_handler() -> None:
+    handlers = getattr(bpy.app.handlers, "exit_pre", None)
+    if handlers is not None:
+        if _cleanup_ubio_temp_on_exit in handlers:
+            handlers.remove(_cleanup_ubio_temp_on_exit)
+        return
+
+    atexit.unregister(_cleanup_ubio_temp_on_exit)
 
 
 def register():
     register_translations()
     auto_load.register()
     bpy.types.Scene.ubio_params = PointerProperty(type=UBIO_PG_Params)
+    _register_exit_handler()
 
 
 def unregister():
+    _unregister_exit_handler()
     if hasattr(bpy.types.Scene, "ubio_params"):
         del bpy.types.Scene.ubio_params
     auto_load.unregister()
     unregister_translations()
-

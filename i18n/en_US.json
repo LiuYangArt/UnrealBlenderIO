@@ -87,6 +87,7 @@
   "report.export_json.level_asset_not_found": "Level Asset Collection not found",
   "report.export_json.sync_done": "Blender object transforms have been synced to JSON file",
   "op.clean_temp.label": "Clean UBIO Temp Files",
-  "op.clean_temp.desc": "Clean UBIO temp files",
-  "report.clean_temp.done": "UBIO temp files cleaned: {path}"
+  "op.clean_temp.desc": "Clean all files under the UBIO temp directory",
+  "report.clean_temp.done": "UBIO temp directory cleaned: {path} ({count} entries removed)",
+  "report.clean_temp.failed": "Failed to clean UBIO temp directory: {path} ({error})"
 }

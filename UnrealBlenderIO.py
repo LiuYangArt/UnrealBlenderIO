@@ -9,6 +9,7 @@ from mathutils import Color
 from .util import (
     apply_static_mesh_session_metadata,
     build_static_mesh_collection_name,
+    clean_ubio_temp_dir,
     ensure_directory,
     find_latest_static_mesh_session_file,
     find_static_mesh_session_objects,
@@ -910,15 +911,16 @@ class UBIO_OT_CleanTempFiles(bpy.types.Operator):
     bl_description = msgid("op.clean_temp.desc")
 
     def execute(self, context):
-        params = context.scene.ubio_params
-        json_path = params.ubio_json_path
-        dir_path = os.path.dirname(json_path)
-        for file in os.listdir(dir_path):
-            file_path = os.path.join(dir_path, file)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-        self.report({"INFO"}, tr("report.clean_temp.done", path=dir_path))
-        
+        try:
+            dir_path, removed_count = clean_ubio_temp_dir()
+        except Exception as exc:
+            self.report(
+                {"ERROR"},
+                tr("report.clean_temp.failed", path=Const.DEFAULT_IO_TEMP_DIR, error=str(exc)),
+            )
+            return {"CANCELLED"}
+
+        self.report({"INFO"}, tr("report.clean_temp.done", path=dir_path, count=removed_count))
         return {"FINISHED"}
 
 

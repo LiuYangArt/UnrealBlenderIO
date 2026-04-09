@@ -56,6 +56,43 @@ class Const:
     STATIC_MESH_STATUS_FAILED = "FAILED"
 
 
+def get_ubio_temp_dir() -> str:
+    return os.path.abspath(os.path.normpath(Const.DEFAULT_IO_TEMP_DIR))
+
+
+def _is_safe_ubio_temp_dir(dir_path: str) -> bool:
+    normalized_path = os.path.abspath(os.path.normpath(dir_path))
+    tail = os.path.splitdrive(normalized_path)[1]
+    if tail in ("", "\\", "/"):
+        return False
+
+    parts = [part for part in normalized_path.replace("/", "\\").split("\\") if part]
+    return len(parts) >= 2 and parts[-1].upper() == "UBIO"
+
+
+def clean_ubio_temp_dir() -> tuple[str, int]:
+    target_dir = get_ubio_temp_dir()
+    if not _is_safe_ubio_temp_dir(target_dir):
+        raise ValueError(f"Refusing to clean unsafe temp dir: {target_dir}")
+
+    if not os.path.isdir(target_dir):
+        return target_dir, 0
+
+    removed_entries = 0
+    for entry in os.scandir(target_dir):
+        try:
+            if entry.is_dir(follow_symlinks=False) and not entry.is_symlink():
+                shutil.rmtree(entry.path)
+            else:
+                os.remove(entry.path)
+            removed_entries += 1
+        except FileNotFoundError:
+            continue
+
+    os.makedirs(target_dir, exist_ok=True)
+    return target_dir, removed_entries
+
+
 def find_objs_bb_center(objs) -> Vector:
     """查找所有对象Bounding Box的中心点"""
 
