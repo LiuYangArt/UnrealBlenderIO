@@ -7,6 +7,18 @@ from mathutils import Color
 # from mathutils import Vector
 # from math import radians
 from .util import (
+    apply_static_mesh_session_metadata,
+    build_static_mesh_collection_name,
+    ensure_directory,
+    find_latest_static_mesh_session_file,
+    find_static_mesh_session_objects,
+    get_iso_timestamp,
+    get_static_mesh_edited_fbx,
+    get_static_mesh_session_file,
+    get_static_mesh_session_file_from_object,
+    load_static_mesh_session,
+    save_static_mesh_session,
+    update_static_mesh_session_status,
     get_all_children,
     # find_level_asset_coll,
     set_proxy_pivot_properties,
@@ -357,9 +369,299 @@ def import_json_scene(json_path: str):
     set_random_color_by_class(level_asset_coll.objects)
     return ubio_coll
 
+
+def get_static_mesh_session_context(context):
+    params = context.scene.ubio_params
+    active_obj = context.active_object
+    selected_objects = list(context.selected_objects)
+
+    candidate_objects = []
+    if active_obj is not None:
+        candidate_objects.append(active_obj)
+    candidate_objects.extend([obj for obj in selected_objects if obj not in candidate_objects])
+
+    for obj in candidate_objects:
+        session_file = get_static_mesh_session_file_from_object(obj)
+        if session_file:
+            return session_file, obj
+
+    session_path = params.ubio_static_mesh_session_path
+    if session_path:
+        return session_path, None
+    return None, None
+
+
+def import_static_mesh_session(session_file: str):
+    session_data = load_static_mesh_session(session_file)
+    if session_data.get("session_type") != Const.STATIC_MESH_SESSION_TYPE:
+        raise ValueError("invalid_session_type")
+
+    source_fbx = session_data.get("paths", {}).get("source_fbx")
+    if not source_fbx or not os.path.isfile(source_fbx):
+        raise FileNotFoundError(source_fbx or "")
+
+    collection_name = build_static_mesh_collection_name(session_data)
+    session_collection = bpy.data.collections.get(collection_name)
+    if session_collection is None:
+        session_collection = bpy.data.collections.new(collection_name)
+        bpy.context.scene.collection.children.link(session_collection)
+    else:
+        for obj in list(session_collection.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    existing_objs = set(bpy.data.objects)
+    bpy.ops.import_scene.fbx(
+        filepath=source_fbx,
+        use_custom_normals=True,
+        use_custom_props=False,
+        use_image_search=False,
+        use_anim=False,
+        bake_space_transform=True,
+    )
+    imported_objs = [obj for obj in bpy.data.objects if obj not in existing_objs]
+
+    if not imported_objs:
+        raise RuntimeError("no_imported_objects")
+
+    for obj in imported_objs:
+        for coll in list(obj.users_collection):
+            coll.objects.unlink(obj)
+        session_collection.objects.link(obj)
+        apply_static_mesh_session_metadata(
+            obj,
+            session_file,
+            session_data,
+            collection_name=session_collection.name,
+        )
+
+    apply_static_mesh_session_metadata(
+        session_collection,
+        session_file,
+        session_data,
+        collection_name=session_collection.name,
+    )
+    update_static_mesh_session_status(
+        session_data,
+        Const.STATIC_MESH_STATUS_IMPORTED_IN_BLENDER,
+        "imported_in_blender",
+    )
+    session_data.setdefault("timestamps", {})
+    session_data["timestamps"].setdefault("exported_from_blender", None)
+    session_data["timestamps"].setdefault("reimported_in_ue", None)
+    session_data.setdefault("imported_object_names", [])
+    session_data["imported_object_names"] = [obj.name for obj in imported_objs]
+    session_data["last_imported_in_blender_at"] = get_iso_timestamp()
+    save_static_mesh_session(session_file, session_data)
+    return session_data, imported_objs
+
+
+def export_static_mesh_session_to_fbx(context, session_file: str, session_data: dict):
+    session_id = session_data.get("session_id", "")
+    export_objects = [
+        obj
+        for obj in find_static_mesh_session_objects(session_id)
+        if obj.type in {"MESH", "EMPTY"}
+    ]
+
+    if not export_objects:
+        raise RuntimeError("no_export_objects")
+
+    session_dir = os.path.dirname(session_file)
+    ensure_directory(session_dir)
+    edited_fbx_path = session_data.get("paths", {}).get("edited_fbx") or get_static_mesh_edited_fbx(session_dir)
+
+    previous_active = context.view_layer.objects.active
+    previous_selection = list(context.selected_objects)
+    previous_mode = previous_active.mode if previous_active is not None else "OBJECT"
+
+    if previous_active is not None and previous_active.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+    bpy.ops.object.select_all(action="DESELECT")
+    export_objects.sort(key=lambda obj: (obj.type != "MESH", obj.name))
+    for obj in export_objects:
+        obj.select_set(True)
+    context.view_layer.objects.active = export_objects[0]
+
+    bpy.ops.export_scene.fbx(
+        filepath=edited_fbx_path,
+        use_selection=True,
+        object_types={"MESH", "EMPTY"},
+        use_mesh_modifiers=True,
+        apply_unit_scale=True,
+        bake_space_transform=False,
+        axis_forward="-Z",
+        axis_up="Y",
+        add_leaf_bones=False,
+        path_mode="AUTO",
+    )
+
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in previous_selection:
+        if obj.name in bpy.data.objects:
+            obj.select_set(True)
+    if previous_active is not None and previous_active.name in bpy.data.objects:
+        context.view_layer.objects.active = previous_active
+        if previous_mode != "OBJECT":
+            bpy.ops.object.mode_set(mode=previous_mode)
+
+    session_data.setdefault("paths", {})
+    session_data["paths"]["edited_fbx"] = edited_fbx_path
+    update_static_mesh_session_status(
+        session_data,
+        Const.STATIC_MESH_STATUS_EXPORTED_FROM_BLENDER,
+        "exported_from_blender",
+    )
+    save_static_mesh_session(session_file, session_data)
+    return edited_fbx_path
+
 # =====================
 # 主要操作类
 # =====================
+class UBIO_OT_ImportLatestStaticMeshSession(bpy.types.Operator):
+    bl_idname = "ubio.import_latest_static_mesh_session"
+    bl_label = msgid("op.import_latest_static_mesh.label")
+    bl_description = msgid("op.import_latest_static_mesh.desc")
+    bl_options = {"UNDO"}
+
+    latest_session_path: bpy.props.StringProperty()
+
+    def execute(self, context):
+        if not self.latest_session_path or not os.path.isfile(self.latest_session_path):
+            self.report({"ERROR"}, tr("report.static_mesh.latest_session_not_found"))
+            return {"CANCELLED"}
+
+        params = context.scene.ubio_params
+        params.ubio_static_mesh_session_path = self.latest_session_path
+
+        try:
+            session_data, imported_objs = import_static_mesh_session(self.latest_session_path)
+        except FileNotFoundError as exc:
+            self.report(
+                {"ERROR"},
+                tr("report.static_mesh.source_fbx_not_found", path=str(exc)),
+            )
+            return {"CANCELLED"}
+        except ValueError:
+            self.report({"ERROR"}, tr("report.static_mesh.invalid_session_type"))
+            return {"CANCELLED"}
+        except Exception:
+            self.report({"ERROR"}, tr("report.static_mesh.import_failed"))
+            return {"CANCELLED"}
+
+        for obj in imported_objs:
+            obj.select_set(True)
+        context.view_layer.objects.active = imported_objs[0]
+        self.report(
+            {"INFO"},
+            tr(
+                "report.static_mesh.import_success",
+                session_id=session_data.get("session_id", ""),
+            ),
+        )
+        return {"FINISHED"}
+
+    def invoke(self, context, event):
+        latest_session_path = find_latest_static_mesh_session_file()
+        if not latest_session_path:
+            self.report(
+                {"ERROR"},
+                tr(
+                    "report.static_mesh.no_session_in_dir",
+                    path=Const.STATIC_MESH_SESSION_DIR,
+                ),
+            )
+            return {"CANCELLED"}
+        self.latest_session_path = latest_session_path
+        return self.execute(context)
+
+
+class UBIO_OT_ImportStaticMeshSession(bpy.types.Operator):
+    bl_idname = "ubio.import_static_mesh_session"
+    bl_label = msgid("op.import_static_mesh.label")
+    bl_description = msgid("op.import_static_mesh.desc")
+    bl_options = {"UNDO"}
+
+    def execute(self, context):
+        params = context.scene.ubio_params
+        session_path = params.ubio_static_mesh_session_path
+        if not session_path or not os.path.isfile(session_path):
+            self.report(
+                {"ERROR"},
+                tr("report.static_mesh.session_file_not_found", path=session_path),
+            )
+            return {"CANCELLED"}
+
+        try:
+            session_data, imported_objs = import_static_mesh_session(session_path)
+        except FileNotFoundError as exc:
+            self.report(
+                {"ERROR"},
+                tr("report.static_mesh.source_fbx_not_found", path=str(exc)),
+            )
+            return {"CANCELLED"}
+        except ValueError:
+            self.report({"ERROR"}, tr("report.static_mesh.invalid_session_type"))
+            return {"CANCELLED"}
+        except Exception:
+            self.report({"ERROR"}, tr("report.static_mesh.import_failed"))
+            return {"CANCELLED"}
+
+        for obj in imported_objs:
+            obj.select_set(True)
+        context.view_layer.objects.active = imported_objs[0]
+        self.report(
+            {"INFO"},
+            tr(
+                "report.static_mesh.import_success",
+                session_id=session_data.get("session_id", ""),
+            ),
+        )
+        return {"FINISHED"}
+
+
+class UBIO_OT_ExportStaticMeshSession(bpy.types.Operator):
+    bl_idname = "ubio.export_static_mesh_session"
+    bl_label = msgid("op.export_static_mesh.label")
+    bl_description = msgid("op.export_static_mesh.desc")
+    bl_options = {"UNDO"}
+
+    def execute(self, context):
+        params = context.scene.ubio_params
+        session_file, source_obj = get_static_mesh_session_context(context)
+        if not session_file or not os.path.isfile(session_file):
+            self.report(
+                {"ERROR"},
+                tr("report.static_mesh.session_file_not_found", path=session_file or ""),
+            )
+            return {"CANCELLED"}
+
+        try:
+            session_data = load_static_mesh_session(session_file)
+            edited_fbx_path = export_static_mesh_session_to_fbx(context, session_file, session_data)
+        except RuntimeError as exc:
+            if str(exc) == "no_export_objects":
+                self.report({"ERROR"}, tr("report.static_mesh.no_export_objects"))
+                return {"CANCELLED"}
+            self.report({"ERROR"}, tr("report.static_mesh.export_failed"))
+            return {"CANCELLED"}
+        except Exception:
+            self.report({"ERROR"}, tr("report.static_mesh.export_failed"))
+            return {"CANCELLED"}
+
+        params.ubio_static_mesh_session_path = session_file
+        if source_obj is not None:
+            source_obj.select_set(True)
+        self.report(
+            {"INFO"},
+            tr(
+                "report.static_mesh.export_success",
+                path=edited_fbx_path,
+            ),
+        )
+        return {"FINISHED"}
+
+
 class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
     bl_idname = "ubio.import_latest_unreal_scene"
     bl_label = msgid("op.import_latest.label")

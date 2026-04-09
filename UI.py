@@ -1,4 +1,5 @@
 import bpy
+import os
 from bpy.props import (
     # BoolProperty,
     # EnumProperty,
@@ -40,6 +41,15 @@ class UBIO_PG_Params(PropertyGroup):
         subtype="DIR_PATH",
         options={'HIDDEN'},
     )
+
+    ubio_static_mesh_session_path: StringProperty(
+        name=msgid("prop.static_mesh_session_path.name"),
+        description=msgid("prop.static_mesh_session_path.desc"),
+        default=os.path.join(Const.STATIC_MESH_SESSION_DIR, Const.STATIC_MESH_SESSION_FILE),
+        maxlen=1024,
+        subtype="FILE_PATH",
+        options={'HIDDEN'},
+    )
         
 
 class UBIO_PT_ToolPanel(bpy.types.Panel):
@@ -62,6 +72,19 @@ class UBIO_PT_ToolPanel(bpy.types.Panel):
         box_column.operator("ubio.import_unreal_scene", icon="IMPORT")
         box_column.operator("ubio.export_unreal_scene_json", icon="EXPORT")
         box_column.operator("ubio.clean_tempfiles", icon="FILE_REFRESH")
+
+        static_mesh_box = layout.box()
+        static_mesh_column = static_mesh_box.column()
+        static_mesh_column.label(text=msgid("panel.static_mesh_title"))
+        static_mesh_column.prop(
+            parameters,
+            "ubio_static_mesh_session_path",
+            text=msgid("panel.session_path_label"),
+        )
+        static_mesh_column.operator("ubio.import_latest_static_mesh_session", icon="IMPORT")
+        static_mesh_column.operator("ubio.import_static_mesh_session", icon="FILE_FOLDER")
+        static_mesh_column.operator("ubio.export_static_mesh_session", icon="EXPORT")
+
         box_column.separator()
         box_column.label(text=msgid("panel.tools_title"))
         box_column.operator("ubio.add_proxy_pivot", icon="EMPTY_ARROWS")

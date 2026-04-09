@@ -1,8 +1,22 @@
 import unreal
 import os
 import json
+import traceback
+from datetime import datetime
 #constants
 DEFAULT_IO_TEMP_DIR = r"C:\Temp\UBIO"
+STATIC_MESH_SESSION_DIR = os.path.join(DEFAULT_IO_TEMP_DIR, "StaticMeshSessions")
+STATIC_MESH_SESSION_FILE = "session.json"
+STATIC_MESH_SOURCE_FBX = "source.fbx"
+STATIC_MESH_EDITED_FBX = "edited.fbx"
+STATIC_MESH_SESSION_TYPE = "static_mesh_roundtrip"
+STATIC_MESH_SCHEMA_VERSION = "1.0"
+STATIC_MESH_STATUS_EXPORTED_FROM_UE = "EXPORTED_FROM_UE"
+STATIC_MESH_STATUS_IMPORTED_IN_BLENDER = "IMPORTED_IN_BLENDER"
+STATIC_MESH_STATUS_EXPORTED_FROM_BLENDER = "EXPORTED_FROM_BLENDER"
+STATIC_MESH_STATUS_REIMPORTED_IN_UE = "REIMPORTED_IN_UE"
+STATIC_MESH_STATUS_FAILED = "FAILED"
+STATIC_MESH_LOG_PREFIX = "[UBIO StaticMesh]"
 BL_FLAG = "Blender"
 BL_NEW = "NewActor"
 BL_DEL = "Removed"
@@ -13,7 +27,305 @@ actor_subsys= unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 # unreal.EditorAssetSubsystem.set_dirty_flag
 
 editor_util = unreal.EditorUtilityLibrary
-selected_assets = editor_util.get_selected_assets()
+asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
+editor_asset_lib = unreal.EditorAssetLibrary
+
+
+def log_static_mesh_info(message):
+    unreal.log(f"{STATIC_MESH_LOG_PREFIX} {message}")
+
+
+def log_static_mesh_error(message):
+    unreal.log_error(f"{STATIC_MESH_LOG_PREFIX} {message}")
+
+
+def get_iso_timestamp():
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def ensure_directory(path):
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def make_safe_name(value):
+    safe = "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in str(value))
+    safe = safe.strip("_")
+    return safe or "StaticMesh"
+
+
+def get_session_file_path(session_dir):
+    return os.path.join(session_dir, STATIC_MESH_SESSION_FILE)
+
+
+def get_static_mesh_source_fbx_path(session_dir):
+    return os.path.join(session_dir, STATIC_MESH_SOURCE_FBX)
+
+
+def get_static_mesh_edited_fbx_path(session_dir):
+    return os.path.join(session_dir, STATIC_MESH_EDITED_FBX)
+
+
+def write_json_file(file_path, data):
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def read_json_file(file_path):
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def list_static_mesh_session_files():
+    if not os.path.isdir(STATIC_MESH_SESSION_DIR):
+        return []
+
+    session_files = []
+    for entry in os.scandir(STATIC_MESH_SESSION_DIR):
+        if not entry.is_dir():
+            continue
+        session_file = get_session_file_path(entry.path)
+        if os.path.isfile(session_file):
+            session_files.append(session_file)
+
+    session_files.sort(key=os.path.getmtime, reverse=True)
+    return session_files
+
+
+def find_latest_static_mesh_session_file():
+    session_files = list_static_mesh_session_files()
+    if not session_files:
+        return None
+    return session_files[0]
+
+
+def load_static_mesh_session(session_file):
+    session_data = read_json_file(session_file)
+    session_dir = os.path.dirname(session_file)
+    session_data.setdefault("schema_version", STATIC_MESH_SCHEMA_VERSION)
+    session_data.setdefault("session_type", STATIC_MESH_SESSION_TYPE)
+    session_data.setdefault("paths", {})
+    session_data["paths"].setdefault("source_fbx", get_static_mesh_source_fbx_path(session_dir))
+    session_data["paths"].setdefault("edited_fbx", get_static_mesh_edited_fbx_path(session_dir))
+    session_data.setdefault("timestamps", {})
+    return session_data
+
+
+def save_static_mesh_session(session_file, session_data):
+    session_dir = os.path.dirname(session_file)
+    session_data.setdefault("paths", {})
+    session_data["paths"]["source_fbx"] = session_data["paths"].get(
+        "source_fbx", get_static_mesh_source_fbx_path(session_dir)
+    )
+    session_data["paths"]["edited_fbx"] = session_data["paths"].get(
+        "edited_fbx", get_static_mesh_edited_fbx_path(session_dir)
+    )
+    write_json_file(session_file, session_data)
+
+
+def update_static_mesh_session_status(session_data, status, timestamp_key):
+    session_data["status"] = status
+    session_data.setdefault("timestamps", {})
+    session_data["timestamps"][timestamp_key] = get_iso_timestamp()
+
+
+def split_object_path(asset_path):
+    object_name = asset_path.rsplit(".", 1)[-1]
+    package_path = asset_path.rsplit("/", 1)[0]
+    return package_path, object_name
+
+
+def get_static_mesh_from_actor(actor):
+    if actor is None:
+        return None
+
+    component = actor.get_component_by_class(unreal.StaticMeshComponent)
+    if component is None:
+        return None
+
+    static_mesh = component.get_editor_property("static_mesh")
+    if static_mesh is None:
+        return None
+
+    return static_mesh
+
+
+def get_selected_static_mesh_source():
+    selected_actors = actor_subsys.get_selected_level_actors()
+    log_static_mesh_info(f"Selected level actors: {len(selected_actors)}")
+    if len(selected_actors) == 1:
+        actor = selected_actors[0]
+        static_mesh = get_static_mesh_from_actor(actor)
+        if static_mesh is not None:
+            log_static_mesh_info(
+                f"Resolved level actor selection: actor={actor.get_actor_label()} mesh={static_mesh.get_path_name()}"
+            )
+            return {
+                "selection_source": "level_actor",
+                "actor": actor,
+                "static_mesh": static_mesh,
+            }
+        log_static_mesh_info(
+            f"Selected actor has no StaticMeshComponent/static mesh: {actor.get_actor_label()}"
+        )
+    elif len(selected_actors) > 1:
+        actor_names = [actor.get_actor_label() for actor in selected_actors]
+        log_static_mesh_info(f"Multiple level actors selected: {actor_names}")
+
+    selected_assets = editor_util.get_selected_assets()
+    log_static_mesh_info(f"Selected content browser assets: {len(selected_assets)}")
+    static_mesh_assets = []
+    for asset in selected_assets:
+        asset_class = asset.get_class().get_name() if asset else "None"
+        asset_path = asset.get_path_name() if asset else "None"
+        log_static_mesh_info(f"Content Browser selection: class={asset_class} path={asset_path}")
+        if asset and asset_class == "StaticMesh":
+            static_mesh_assets.append(asset)
+
+    if len(static_mesh_assets) == 1:
+        static_mesh = static_mesh_assets[0]
+        log_static_mesh_info(
+            f"Resolved content browser selection: mesh={static_mesh.get_path_name()}"
+        )
+        return {
+            "selection_source": "content_browser_asset",
+            "actor": None,
+            "static_mesh": static_mesh,
+        }
+
+    if len(static_mesh_assets) > 1:
+        raise RuntimeError("multiple_static_mesh_assets_selected")
+
+    if len(selected_actors) != 1:
+        raise RuntimeError("expected_single_selected_actor")
+
+    raise RuntimeError("selected_source_has_no_static_mesh")
+
+
+def build_static_mesh_session_data(actor, static_mesh, session_id, session_dir, selection_source):
+    actor_label = ""
+    actor_guid = ""
+    if actor is not None:
+        try:
+            actor_label = str(actor.get_actor_label())
+        except Exception:
+            actor_label = ""
+    try:
+        actor_guid = str(actor.actor_guid) if actor is not None else ""
+    except Exception:
+        actor_guid = ""
+
+    return {
+        "schema_version": STATIC_MESH_SCHEMA_VERSION,
+        "session_type": STATIC_MESH_SESSION_TYPE,
+        "session_id": session_id,
+        "ue_version": str(unreal.SystemLibrary.get_engine_version()),
+        "blender_version": "5.0",
+        "status": STATIC_MESH_STATUS_EXPORTED_FROM_UE,
+        "selection_source": selection_source,
+        "source_actor": {
+            "label": actor_label,
+            "guid": actor_guid,
+        },
+        "source_asset": {
+            "asset_name": str(static_mesh.get_name()),
+            "asset_path": str(static_mesh.get_path_name()),
+        },
+        "paths": {
+            "source_fbx": get_static_mesh_source_fbx_path(session_dir),
+            "edited_fbx": get_static_mesh_edited_fbx_path(session_dir),
+        },
+        "export_options": {
+            "axis": "UE_TO_BLENDER_DEFAULT",
+            "unit": "CENTIMETERS",
+        },
+        "timestamps": {
+            "exported_from_ue": get_iso_timestamp(),
+            "imported_in_blender": None,
+            "exported_from_blender": None,
+            "reimported_in_ue": None,
+        },
+    }
+
+
+def export_static_mesh_asset_to_fbx(static_mesh, output_fbx_path):
+    output_dir = os.path.dirname(output_fbx_path)
+    ensure_directory(output_dir)
+    log_static_mesh_info(
+        f"Exporting static mesh asset to FBX: asset={static_mesh.get_path_name()} output={output_fbx_path}"
+    )
+
+    export_options = unreal.FbxExportOption()
+    export_options.export_source_mesh = True
+    export_options.vertex_color = False
+    export_options.level_of_detail = False
+    export_options.collision = False
+
+    export_task = unreal.AssetExportTask()
+    export_task.object = static_mesh
+    export_task.filename = output_fbx_path
+    export_task.automated = True
+    export_task.prompt = False
+    export_task.replace_identical = True
+    export_task.options = export_options
+    static_mesh_exporter = unreal.StaticMeshExporterFBX()
+    export_task.exporter = static_mesh_exporter
+    result = static_mesh_exporter.run_asset_export_task(export_task)
+    export_errors = list(export_task.errors or [])
+    if export_errors:
+        for error_message in export_errors:
+            log_static_mesh_error(f"Exporter message: {error_message}")
+
+    log_static_mesh_info(f"Exporter returned: {result}")
+
+    if not result or not os.path.isfile(output_fbx_path):
+        if os.path.isfile(output_fbx_path):
+            file_size = os.path.getsize(output_fbx_path)
+            log_static_mesh_info(f"Unexpected partial FBX output exists: {output_fbx_path} ({file_size} bytes)")
+        else:
+            log_static_mesh_error(f"FBX file was not created: {output_fbx_path}")
+        raise RuntimeError("static_mesh_export_failed")
+    file_size = os.path.getsize(output_fbx_path)
+    log_static_mesh_info(f"FBX export complete: {output_fbx_path} ({file_size} bytes)")
+    return output_fbx_path
+
+
+def build_static_mesh_import_options():
+    options = unreal.FbxImportUI()
+    options.set_editor_property("automated_import_should_detect_type", False)
+    options.set_editor_property("import_mesh", True)
+    options.set_editor_property("import_as_skeletal", False)
+    options.set_editor_property("import_materials", False)
+    options.set_editor_property("import_textures", False)
+    options.set_editor_property("import_animations", False)
+    options.set_editor_property("mesh_type_to_import", unreal.FBXImportType.FBXIT_STATIC_MESH)
+
+    static_mesh_import_data = options.get_editor_property("static_mesh_import_data")
+    static_mesh_import_data.set_editor_property("combine_meshes", True)
+    static_mesh_import_data.set_editor_property("auto_generate_collision", False)
+    return options
+
+
+def reimport_static_mesh_from_fbx(static_mesh_asset_path, source_fbx_path):
+    package_path, asset_name = split_object_path(static_mesh_asset_path)
+    task = unreal.AssetImportTask()
+    task.filename = source_fbx_path
+    task.destination_path = package_path
+    task.destination_name = asset_name
+    task.automated = True
+    task.replace_existing = True
+    task.replace_existing_settings = True
+    task.save = True
+    task.options = build_static_mesh_import_options()
+
+    asset_tools.import_asset_tasks([task])
+
+    reimported_asset = unreal.load_asset(static_mesh_asset_path)
+    if reimported_asset is None:
+        raise RuntimeError("static_mesh_reimport_failed")
+
+    editor_asset_lib.save_loaded_asset(reimported_asset, only_if_is_dirty=False)
+    return reimported_asset
 
 
 def get_default_object(asset) -> unreal.Object:
@@ -514,7 +826,92 @@ def import_json(file_path):
     # unreal.EditorLevelLibrary.editor_screen_refresh()
     unreal.log("关卡数据导入完成。")
     return
-    
+
+
+def ubio_export_selected_static_mesh_to_blender():
+    try:
+        log_static_mesh_info("ubio_export_selected_static_mesh_to_blender started")
+        selection = get_selected_static_mesh_source()
+        actor = selection["actor"]
+        static_mesh = selection["static_mesh"]
+        selection_source = selection["selection_source"]
+        session_suffix = make_safe_name(static_mesh.get_name())
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_id = f"{timestamp}_{session_suffix}"
+        session_dir = ensure_directory(os.path.join(STATIC_MESH_SESSION_DIR, session_id))
+        source_fbx_path = get_static_mesh_source_fbx_path(session_dir)
+        session_file_path = get_session_file_path(session_dir)
+
+        log_static_mesh_info(
+            f"Session prepared: source={selection_source} session_id={session_id} session_dir={session_dir}"
+        )
+        session_data = build_static_mesh_session_data(
+            actor,
+            static_mesh,
+            session_id,
+            session_dir,
+            selection_source,
+        )
+        export_static_mesh_asset_to_fbx(static_mesh, source_fbx_path)
+        save_static_mesh_session(session_file_path, session_data)
+
+        log_static_mesh_info(f"StaticMesh session exported successfully: {session_file_path}")
+        return session_file_path
+    except Exception as exc:
+        log_static_mesh_error(f"Export to Blender failed: {exc}")
+        log_static_mesh_error(traceback.format_exc())
+        return None
+
+
+def ubio_reimport_static_mesh_from_blender(session_file_path=""):
+    session_file = session_file_path or ""
+    try:
+        session_file = session_file_path or find_latest_static_mesh_session_file()
+        if not session_file or not os.path.isfile(session_file):
+            raise RuntimeError("static_mesh_session_not_found")
+
+        session_data = load_static_mesh_session(session_file)
+        if session_data.get("session_type") != STATIC_MESH_SESSION_TYPE:
+            raise RuntimeError("invalid_static_mesh_session")
+
+        edited_fbx_path = session_data.get("paths", {}).get("edited_fbx", "")
+        if not edited_fbx_path or not os.path.isfile(edited_fbx_path):
+            raise RuntimeError(f"edited_fbx_missing: {edited_fbx_path}")
+
+        asset_path = session_data.get("source_asset", {}).get("asset_path", "")
+        if not asset_path:
+            raise RuntimeError("missing_source_asset_path")
+
+        source_asset = unreal.load_asset(asset_path)
+        if source_asset is None:
+            raise RuntimeError(f"source_asset_not_found: {asset_path}")
+
+        reimport_static_mesh_from_fbx(asset_path, edited_fbx_path)
+        update_static_mesh_session_status(
+            session_data,
+            STATIC_MESH_STATUS_REIMPORTED_IN_UE,
+            "reimported_in_ue",
+        )
+        save_static_mesh_session(session_file, session_data)
+
+        unreal.log(f"已重新导入 StaticMesh 资产: {asset_path}")
+        return asset_path
+    except Exception as exc:
+        unreal.log_error(f"导入 Blender 返回的 StaticMesh 失败: {exc}")
+        if session_file and os.path.isfile(session_file):
+            try:
+                failed_session = load_static_mesh_session(session_file)
+                update_static_mesh_session_status(
+                    failed_session,
+                    STATIC_MESH_STATUS_FAILED,
+                    "reimported_in_ue",
+                )
+                save_static_mesh_session(session_file, failed_session)
+            except Exception:
+                pass
+        unreal.log_error(traceback.format_exc())
+        return None
+
 
 # 主执行部分
 
@@ -538,4 +935,8 @@ def ubio_import():
     print(f"从{json_path}导入")
     import_json(json_path) 
 # ubio_import()
+
+
+if __name__ == "__main__":
+    ubio_export_selected_static_mesh_to_blender()
 

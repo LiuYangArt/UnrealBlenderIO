@@ -4,6 +4,8 @@ from math import radians
 from math import pi
 import shutil
 import os
+import json
+from datetime import datetime, timezone
 # import addon_utils
 
 # =====================
@@ -32,6 +34,26 @@ class Const:
     # 其它常量
     ADDON_NAME = "Unreal Blender IO"
     DEFAULT_IO_TEMP_DIR = "C:\\Temp\\UBIO\\"
+    STATIC_MESH_SESSION_DIR = os.path.join(DEFAULT_IO_TEMP_DIR, "StaticMeshSessions")
+    STATIC_MESH_SESSION_FILE = "session.json"
+    STATIC_MESH_SOURCE_FBX = "source.fbx"
+    STATIC_MESH_EDITED_FBX = "edited.fbx"
+    STATIC_MESH_SESSION_TYPE = "static_mesh_roundtrip"
+    STATIC_MESH_SESSION_SCHEMA_VERSION = "1.0"
+    STATIC_MESH_COLLECTION_PREFIX = "UBIO_StaticMesh"
+    STATIC_MESH_PROP_SESSION_ID = "ubio_session_id"
+    STATIC_MESH_PROP_SESSION_DIR = "ubio_session_dir"
+    STATIC_MESH_PROP_SESSION_FILE = "ubio_session_file"
+    STATIC_MESH_PROP_SOURCE_ASSET_PATH = "ubio_source_asset_path"
+    STATIC_MESH_PROP_SOURCE_ACTOR_GUID = "ubio_source_actor_guid"
+    STATIC_MESH_PROP_ROUNDTRIP_TYPE = "ubio_roundtrip_type"
+    STATIC_MESH_PROP_COLLECTION = "ubio_session_collection"
+    STATIC_MESH_ROUNDTRIP_TYPE = "StaticMesh"
+    STATIC_MESH_STATUS_EXPORTED_FROM_UE = "EXPORTED_FROM_UE"
+    STATIC_MESH_STATUS_IMPORTED_IN_BLENDER = "IMPORTED_IN_BLENDER"
+    STATIC_MESH_STATUS_EXPORTED_FROM_BLENDER = "EXPORTED_FROM_BLENDER"
+    STATIC_MESH_STATUS_REIMPORTED_IN_UE = "REIMPORTED_IN_UE"
+    STATIC_MESH_STATUS_FAILED = "FAILED"
 
 
 def find_objs_bb_center(objs) -> Vector:
@@ -279,3 +301,139 @@ def copy_unreal_assets(source_dir: str, target_dir: str):
         else:
             shutil.copy2(s, d)
     print(f"成功将 {source_dir} 复制到 {target_dir}")
+
+
+def get_iso_timestamp() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def ensure_directory(path: str) -> str:
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def get_static_mesh_session_file(session_dir: str) -> str:
+    return os.path.join(session_dir, Const.STATIC_MESH_SESSION_FILE)
+
+
+def get_static_mesh_source_fbx(session_dir: str) -> str:
+    return os.path.join(session_dir, Const.STATIC_MESH_SOURCE_FBX)
+
+
+def get_static_mesh_edited_fbx(session_dir: str) -> str:
+    return os.path.join(session_dir, Const.STATIC_MESH_EDITED_FBX)
+
+
+def list_static_mesh_session_files():
+    session_root = Const.STATIC_MESH_SESSION_DIR
+    if not os.path.isdir(session_root):
+        return []
+
+    session_files = []
+    for entry in os.scandir(session_root):
+        if not entry.is_dir():
+            continue
+        session_file = get_static_mesh_session_file(entry.path)
+        if os.path.isfile(session_file):
+            session_files.append(session_file)
+
+    session_files.sort(key=os.path.getmtime, reverse=True)
+    return session_files
+
+
+def find_latest_static_mesh_session_file():
+    session_files = list_static_mesh_session_files()
+    if not session_files:
+        return None
+    return session_files[0]
+
+
+def load_json_file(file_path: str):
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_json_file(file_path: str, data: dict) -> None:
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def load_static_mesh_session(session_file: str):
+    session_data = load_json_file(session_file)
+    session_dir = os.path.dirname(session_file)
+    session_data.setdefault("schema_version", Const.STATIC_MESH_SESSION_SCHEMA_VERSION)
+    session_data.setdefault("session_type", Const.STATIC_MESH_SESSION_TYPE)
+    session_data.setdefault("paths", {})
+    session_data["paths"].setdefault("source_fbx", get_static_mesh_source_fbx(session_dir))
+    session_data["paths"].setdefault("edited_fbx", get_static_mesh_edited_fbx(session_dir))
+    session_data.setdefault("timestamps", {})
+    return session_data
+
+
+def save_static_mesh_session(session_file: str, session_data: dict) -> None:
+    session_dir = os.path.dirname(session_file)
+    session_data.setdefault("paths", {})
+    session_data["paths"]["source_fbx"] = session_data["paths"].get(
+        "source_fbx", get_static_mesh_source_fbx(session_dir)
+    )
+    session_data["paths"]["edited_fbx"] = session_data["paths"].get(
+        "edited_fbx", get_static_mesh_edited_fbx(session_dir)
+    )
+    save_json_file(session_file, session_data)
+
+
+def update_static_mesh_session_status(
+    session_data: dict,
+    status: str,
+    timestamp_key: str,
+) -> None:
+    session_data["status"] = status
+    session_data.setdefault("timestamps", {})
+    session_data["timestamps"][timestamp_key] = get_iso_timestamp()
+
+
+def build_static_mesh_collection_name(session_data: dict) -> str:
+    asset_name = (
+        session_data.get("source_asset", {}).get("asset_name")
+        or session_data.get("session_id")
+        or "StaticMesh"
+    )
+    session_suffix = str(session_data.get("session_id", "session"))[-8:]
+    return f"{Const.STATIC_MESH_COLLECTION_PREFIX}_{asset_name}_{session_suffix}"
+
+
+def apply_static_mesh_session_metadata(
+    target,
+    session_file: str,
+    session_data: dict,
+    collection_name: str = "",
+) -> None:
+    session_dir = os.path.dirname(session_file)
+    target[Const.STATIC_MESH_PROP_SESSION_ID] = session_data.get("session_id", "")
+    target[Const.STATIC_MESH_PROP_SESSION_DIR] = session_dir
+    target[Const.STATIC_MESH_PROP_SESSION_FILE] = session_file
+    target[Const.STATIC_MESH_PROP_SOURCE_ASSET_PATH] = session_data.get(
+        "source_asset", {}
+    ).get("asset_path", "")
+    target[Const.STATIC_MESH_PROP_SOURCE_ACTOR_GUID] = session_data.get(
+        "source_actor", {}
+    ).get("guid", "")
+    target[Const.STATIC_MESH_PROP_ROUNDTRIP_TYPE] = Const.STATIC_MESH_ROUNDTRIP_TYPE
+    if collection_name:
+        target[Const.STATIC_MESH_PROP_COLLECTION] = collection_name
+
+
+def get_static_mesh_session_file_from_object(obj: bpy.types.Object):
+    if obj is None:
+        return None
+    return obj.get(Const.STATIC_MESH_PROP_SESSION_FILE)
+
+
+def find_static_mesh_session_objects(session_id: str):
+    if not session_id:
+        return []
+    matched = []
+    for obj in bpy.data.objects:
+        if obj.get(Const.STATIC_MESH_PROP_SESSION_ID) == session_id:
+            matched.append(obj)
+    return matched
