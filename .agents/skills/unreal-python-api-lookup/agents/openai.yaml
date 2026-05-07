@@ -1,0 +1,4 @@
+interface:
+  display_name: "Unreal Python API Lookup"
+  short_description: "Lookup UE Python APIs from local stub and probes."
+  default_prompt: "Use $unreal-python-api-lookup to find the local Unreal Python API pattern and the smallest confirming probe."

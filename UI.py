@@ -45,7 +45,7 @@ class UBIO_PG_Params(PropertyGroup):
     ubio_static_mesh_session_path: StringProperty(
         name=msgid("prop.static_mesh_session_path.name"),
         description=msgid("prop.static_mesh_session_path.desc"),
-        default=os.path.join(Const.STATIC_MESH_SESSION_DIR, Const.STATIC_MESH_SESSION_FILE),
+        default=os.path.join(Const.BP_STATIC_MESH_SESSION_DIR, Const.STATIC_MESH_SESSION_FILE),
         maxlen=1024,
         subtype="FILE_PATH",
         options={'HIDDEN'},

@@ -93,3 +93,14 @@
 
 但只要文本会直接显示在 Blender 插件界面或 Blender 操作反馈里，就必须进入本地化。
 
+## Blender Operator 交互规范
+- 新增或修改 Blender operator 的参数交互时，默认先参考项目内已有同类工具，优先复用现有模式。
+- 对可重复执行、参数可后调的工具，默认采用 bevel operator 的交互方式：
+  `bl_options = {"REGISTER", "UNDO"}`，提供 `draw()`，`invoke()` 中完成必要校验后直接 `return self.execute(context)`。
+- 这类参数不应在 operator 执行前弹出阻塞式窗口；应让参数出现在 Blender 左下角的 `Adjust Last Operation` 面板中。
+- 除非用户明确要求，或该工具在执行前必须先确认/输入参数，否则不要使用 `invoke_props_dialog`、`invoke_props_popup`、`invoke_confirm` 这类阻塞式交互。
+- 如果项目内已有对应的 scene/global 参数同步模式，新增参数时应优先沿用，不要单独发明另一套交互或存储方式。
+
+## Unreal Python
+优先参考：
+- `.agents\skills\unreal-python-api-lookup`

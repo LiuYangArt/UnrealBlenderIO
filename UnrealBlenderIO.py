@@ -7,24 +7,31 @@ from mathutils import Color
 # from mathutils import Vector
 # from math import radians
 from .util import (
+    apply_bp_static_mesh_session_metadata,
     apply_static_mesh_session_metadata,
+    build_bp_static_mesh_asset_collection_name,
+    build_bp_static_mesh_collection_name,
     build_static_mesh_collection_name,
     clean_ubio_temp_dir,
     ensure_directory,
     find_latest_static_mesh_session_file,
     find_static_mesh_session_objects,
+    get_bp_static_mesh_edited_fbx,
+    get_bp_static_mesh_log_path,
     get_iso_timestamp,
     get_static_mesh_edited_fbx,
     get_static_mesh_session_file,
     get_static_mesh_session_file_from_object,
     load_static_mesh_session,
+    make_safe_name,
+    save_json_file,
     save_static_mesh_session,
+    set_actor_transform,
     update_static_mesh_session_status,
     get_all_children,
     # find_level_asset_coll,
     set_proxy_pivot_properties,
     get_transform_from_obj,
-    # set_actor_transform,
     # is_obj_transform_equal,
     Const
 )
@@ -371,6 +378,471 @@ def import_json_scene(json_path: str):
     return ubio_coll
 
 
+def write_bp_static_mesh_log(session_file: str, log_name: str, payload: dict) -> str:
+    session_dir = os.path.dirname(session_file)
+    log_path = get_bp_static_mesh_log_path(session_dir, log_name)
+    ensure_directory(os.path.dirname(log_path))
+    payload = dict(payload)
+    payload.setdefault("timestamp", get_iso_timestamp())
+    save_json_file(log_path, payload)
+    return log_path
+
+
+def clear_collection_objects_only(coll: bpy.types.Collection) -> None:
+    for obj in list(coll.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+
+
+def unlink_object_from_all_collections(obj: bpy.types.Object) -> None:
+    for coll in list(obj.users_collection):
+        coll.objects.unlink(obj)
+
+
+def ensure_child_collection(parent: bpy.types.Collection, name: str) -> bpy.types.Collection:
+    coll = bpy.data.collections.get(name)
+    if coll is None:
+        coll = bpy.data.collections.new(name)
+    if coll.name not in [child.name for child in parent.children]:
+        parent.children.link(coll)
+    scene_children = bpy.context.scene.collection.children
+    if parent != bpy.context.scene.collection and coll.name in [child.name for child in scene_children]:
+        scene_children.unlink(coll)
+    return coll
+
+def _get_identity_transform() -> dict:
+    return {
+        "location": {"x": 0, "y": 0, "z": 0},
+        "rotation": {"x": 0, "y": 0, "z": 0},
+        "scale": {"x": 1, "y": 1, "z": 1},
+    }
+
+
+def _create_empty_object(name: str, size: float = 0.2) -> bpy.types.Object:
+    obj = bpy.data.objects.new(name, None)
+    obj.empty_display_type = 'PLAIN_AXES'
+    obj.empty_display_size = size
+    return obj
+
+
+def _set_collection_hidden(coll: bpy.types.Collection, hidden: bool = True) -> None:
+    coll.hide_viewport = hidden
+    coll.hide_render = hidden
+
+
+def _copy_local_transform(source_obj: bpy.types.Object, target_obj: bpy.types.Object) -> None:
+    target_obj.location = source_obj.location.copy()
+    target_obj.rotation_mode = source_obj.rotation_mode
+    if source_obj.rotation_mode == 'QUATERNION':
+        target_obj.rotation_quaternion = source_obj.rotation_quaternion.copy()
+    elif source_obj.rotation_mode == 'AXIS_ANGLE':
+        target_obj.rotation_axis_angle = tuple(source_obj.rotation_axis_angle)
+    else:
+        target_obj.rotation_euler = source_obj.rotation_euler.copy()
+    target_obj.scale = source_obj.scale.copy()
+
+
+def _clone_linked_object(source_obj: bpy.types.Object, name: str) -> bpy.types.Object:
+    clone = source_obj.copy()
+    if source_obj.data is not None:
+        clone.data = source_obj.data
+    clone.animation_data_clear()
+    clone.name = name
+    clone.parent = None
+    _copy_local_transform(source_obj, clone)
+    return clone
+
+
+def _resolve_component_transform(component_data: dict) -> tuple[dict, str]:
+    actor_local_transform = component_data.get("actor_local_transform")
+    if actor_local_transform:
+        return actor_local_transform, "actor_local_transform"
+    relative_transform = component_data.get("relative_transform")
+    if relative_transform:
+        return relative_transform, "relative_transform_compat"
+    world_transform = component_data.get("world_transform")
+    if world_transform:
+        return world_transform, "world_transform_compat"
+    raise RuntimeError(f"missing_component_transform:{component_data.get('component_key', '')}")
+
+
+def _find_bp_session_objects(session_id: str, asset_key: str = "", role: str = "") -> list[bpy.types.Object]:
+    matched = []
+    for obj in bpy.data.objects:
+        if obj.get(Const.BP_STATIC_MESH_PROP_SESSION_ID) != session_id:
+            continue
+        if asset_key and obj.get(Const.BP_STATIC_MESH_PROP_ASSET_KEY) != asset_key:
+            continue
+        if role and obj.get(Const.BP_STATIC_MESH_PROP_COLLECTION_ROLE) != role:
+            continue
+        matched.append(obj)
+    return matched
+
+
+def _get_bp_canonical_root(session_id: str, asset_key: str) -> bpy.types.Object | None:
+    roots = _find_bp_session_objects(session_id, asset_key, Const.BP_STATIC_MESH_ROLE_CANONICAL_ROOT)
+    if not roots:
+        return None
+    roots.sort(key=lambda obj: obj.name)
+    return roots[0]
+
+
+def _get_bp_canonical_objects(canonical_root: bpy.types.Object) -> list[bpy.types.Object]:
+    canonical_objects = [
+        obj for obj in get_all_children(canonical_root)
+        if obj.get(Const.BP_STATIC_MESH_PROP_COLLECTION_ROLE) == Const.BP_STATIC_MESH_ROLE_CANONICAL_OBJECT
+    ]
+    canonical_objects.sort(key=lambda obj: obj.name)
+    return canonical_objects
+
+
+def _is_transform_dict_close(lhs: dict, rhs: dict, tol: float = 1e-4) -> bool:
+    for key in ("location", "rotation", "scale"):
+        left = lhs.get(key, {})
+        right = rhs.get(key, {})
+        for axis in ("x", "y", "z"):
+            if abs(float(left.get(axis, 0.0)) - float(right.get(axis, 0.0))) > tol:
+                return False
+    return True
+
+
+
+def create_bp_static_mesh_root_structure(session_data: dict, session_file: str):
+    session_collection_name = build_bp_static_mesh_collection_name(session_data)
+    session_collection = bpy.data.collections.get(session_collection_name)
+    if session_collection is None:
+        session_collection = bpy.data.collections.new(session_collection_name)
+        bpy.context.scene.collection.children.link(session_collection)
+    else:
+        clear_collection_objects_only(session_collection)
+        for child in list(session_collection.children):
+            clear_collection_and_children(child)
+
+    internal_collection = ensure_child_collection(session_collection, "_UBIO_INTERNAL")
+    _set_collection_hidden(internal_collection, True)
+
+    apply_bp_static_mesh_session_metadata(
+        session_collection,
+        session_file,
+        session_data,
+        collection_role=Const.BP_STATIC_MESH_ROLE_SESSION_ROOT,
+        collection_name=session_collection.name,
+    )
+    apply_bp_static_mesh_session_metadata(
+        internal_collection,
+        session_file,
+        session_data,
+        collection_role=Const.BP_STATIC_MESH_ROLE_INTERNAL_ROOT,
+        collection_name=session_collection.name,
+    )
+    return session_collection, internal_collection
+
+
+def import_bp_static_mesh_session(session_file: str):
+    session_data = load_static_mesh_session(session_file)
+    if session_data.get("session_type") != Const.BP_STATIC_MESH_SESSION_TYPE:
+        raise ValueError("invalid_session_type")
+
+    session_collection, internal_collection = create_bp_static_mesh_root_structure(session_data, session_file)
+    actor_label = session_data.get("source_actor", {}).get("label") or "Blueprint"
+    root_name = f"BP_{make_safe_name(actor_label)}_ROOT"
+    root_obj = _create_empty_object(root_name, size=0.2)
+    session_collection.objects.link(root_obj)
+    apply_bp_static_mesh_session_metadata(
+        root_obj,
+        session_file,
+        session_data,
+        collection_role=Const.BP_STATIC_MESH_ROLE_SESSION_ROOT,
+        collection_name=session_collection.name,
+    )
+    set_actor_transform(root_obj, _get_identity_transform())
+
+    existing_objs = set(bpy.data.objects)
+    asset_object_map = {}
+    import_log = {
+        "session_id": session_data.get("session_id", ""),
+        "session_type": session_data.get("session_type", ""),
+        "schema_version": session_data.get("schema_version", ""),
+        "assets": [],
+        "components": [],
+        "fallbacks": [],
+    }
+
+    for asset_data in session_data.get("assets", []):
+        asset_key = asset_data.get("asset_key", "")
+        source_fbx = asset_data.get("source_fbx", "")
+        if not source_fbx or not os.path.isfile(source_fbx):
+            raise FileNotFoundError(source_fbx or asset_key)
+
+        asset_collection_name = build_bp_static_mesh_asset_collection_name(asset_data)
+        asset_collection = ensure_child_collection(internal_collection, asset_collection_name)
+        clear_collection_objects_only(asset_collection)
+        apply_bp_static_mesh_session_metadata(
+            asset_collection,
+            session_file,
+            session_data,
+            collection_role=Const.BP_STATIC_MESH_ROLE_SOURCE_ASSET,
+            asset_key=asset_key,
+            source_asset_path=asset_data.get("asset_path", ""),
+            collection_name=session_collection.name,
+        )
+
+        canonical_root_name = asset_data.get("canonical_root_name") or f"SRC_{make_safe_name(asset_data.get('asset_name') or asset_key)}_ROOT"
+        canonical_root = _create_empty_object(canonical_root_name, size=0.1)
+        asset_collection.objects.link(canonical_root)
+        apply_bp_static_mesh_session_metadata(
+            canonical_root,
+            session_file,
+            session_data,
+            collection_role=Const.BP_STATIC_MESH_ROLE_CANONICAL_ROOT,
+            asset_key=asset_key,
+            source_asset_path=asset_data.get("asset_path", ""),
+            collection_name=session_collection.name,
+        )
+        set_actor_transform(canonical_root, _get_identity_transform())
+
+        before_import = set(bpy.data.objects)
+        bpy.ops.import_scene.fbx(
+            filepath=source_fbx,
+            use_custom_normals=True,
+            use_custom_props=False,
+            use_image_search=False,
+            use_anim=False,
+            bake_space_transform=True,
+        )
+        imported_objs = [obj for obj in bpy.data.objects if obj not in before_import and obj not in existing_objs]
+        if not imported_objs:
+            raise RuntimeError(f"no_imported_objects_for_asset:{asset_key}")
+
+        imported_obj_set = set(imported_objs)
+        canonical_objects = []
+        for index, obj in enumerate(sorted(imported_objs, key=lambda item: (item.type != "MESH", item.name))):
+            unlink_object_from_all_collections(obj)
+            asset_collection.objects.link(obj)
+            obj.name = f"{make_safe_name(asset_data.get('asset_name') or asset_key)}__SRC__{index}"
+            apply_bp_static_mesh_session_metadata(
+                obj,
+                session_file,
+                session_data,
+                collection_role=Const.BP_STATIC_MESH_ROLE_CANONICAL_OBJECT,
+                asset_key=asset_key,
+                source_asset_path=asset_data.get("asset_path", ""),
+                collection_name=session_collection.name,
+            )
+            if obj.parent is None or obj.parent not in imported_obj_set:
+                obj.parent = canonical_root
+            canonical_objects.append(obj)
+
+        canonical_names = [obj.name for obj in canonical_objects]
+        asset_data["canonical_root_name"] = canonical_root.name
+        asset_data["canonical_object_names"] = canonical_names
+        asset_data["source_object_names"] = list(canonical_names)
+        asset_object_map[asset_key] = {
+            "canonical_root": canonical_root,
+            "canonical_objects": canonical_objects,
+            "source_asset_path": asset_data.get("asset_path", ""),
+        }
+        import_log["assets"].append({
+            "asset_key": asset_key,
+            "asset_path": asset_data.get("asset_path", ""),
+            "source_fbx": source_fbx,
+            "canonical_root_name": canonical_root.name,
+            "canonical_object_names": canonical_names,
+        })
+
+    component_wrapper_names = []
+    for component_data in session_data.get("components", []):
+        component_key = component_data.get("component_key", "")
+        asset_key = component_data.get("asset_key", "")
+        asset_objects = asset_object_map.get(asset_key)
+        if asset_objects is None:
+            raise RuntimeError(f"missing_asset_for_component:{component_key}")
+
+        wrapper_name = f"CMP_{make_safe_name(component_data.get('component_name') or component_key)}"
+        wrapper_obj = _create_empty_object(wrapper_name, size=0.12)
+        session_collection.objects.link(wrapper_obj)
+        wrapper_obj.parent = root_obj
+        apply_bp_static_mesh_session_metadata(
+            wrapper_obj,
+            session_file,
+            session_data,
+            collection_role=Const.BP_STATIC_MESH_ROLE_COMPONENT_WRAPPER,
+            asset_key=asset_key,
+            component_key=component_key,
+            source_asset_path=asset_objects["source_asset_path"],
+            collection_name=session_collection.name,
+        )
+
+        transform_data, transform_source = _resolve_component_transform(component_data)
+        set_actor_transform(wrapper_obj, transform_data)
+        if transform_source != "actor_local_transform":
+            import_log["fallbacks"].append({
+                "component_key": component_key,
+                "fallback": transform_source,
+            })
+
+        canonical_object_map = {}
+        component_object_names = []
+        for index, canonical_obj in enumerate(asset_objects["canonical_objects"]):
+            component_obj = _clone_linked_object(
+                canonical_obj,
+                f"{make_safe_name(component_data.get('component_name') or component_key)}__{index}",
+            )
+            session_collection.objects.link(component_obj)
+            apply_bp_static_mesh_session_metadata(
+                component_obj,
+                session_file,
+                session_data,
+                collection_role=Const.BP_STATIC_MESH_ROLE_COMPONENT_OBJECT,
+                asset_key=asset_key,
+                component_key=component_key,
+                source_asset_path=asset_objects["source_asset_path"],
+                collection_name=session_collection.name,
+            )
+            component_obj[Const.BP_STATIC_MESH_PROP_CANONICAL_OBJECT_NAME] = canonical_obj.name
+            canonical_object_map[canonical_obj.name] = component_obj
+            component_object_names.append(component_obj.name)
+
+        for canonical_obj in asset_objects["canonical_objects"]:
+            component_obj = canonical_object_map[canonical_obj.name]
+            parent_obj = wrapper_obj
+            if canonical_obj.parent and canonical_obj.parent.name in canonical_object_map:
+                parent_obj = canonical_object_map[canonical_obj.parent.name]
+            component_obj.parent = parent_obj
+            _copy_local_transform(canonical_obj, component_obj)
+
+        component_wrapper_names.append(wrapper_obj.name)
+        import_log["components"].append({
+            "component_key": component_key,
+            "component_name": component_data.get("component_name", ""),
+            "asset_key": asset_key,
+            "wrapper_name": wrapper_obj.name,
+            "instance_object_names": component_object_names,
+            "transform_source": transform_source,
+            "attach_chain": component_data.get("attach_chain", []),
+        })
+
+    update_static_mesh_session_status(
+        session_data,
+        Const.STATIC_MESH_STATUS_IMPORTED_IN_BLENDER,
+        "imported_in_blender",
+    )
+    session_data.setdefault("timestamps", {})
+    session_data["timestamps"].setdefault("exported_from_blender", None)
+    session_data["timestamps"].setdefault("reimported_in_ue", None)
+    session_data["imported_object_names"] = [root_obj.name] + component_wrapper_names
+    session_data["last_imported_in_blender_at"] = get_iso_timestamp()
+    save_static_mesh_session(session_file, session_data)
+    write_bp_static_mesh_log(session_file, 'import_blender.json', import_log)
+    return session_data, [root_obj]
+
+
+def export_bp_static_mesh_session_to_fbx(context, session_file: str, session_data: dict):
+    session_dir = os.path.dirname(session_file)
+    export_log = {
+        "session_id": session_data.get("session_id", ""),
+        "session_type": session_data.get("session_type", ""),
+        "schema_version": session_data.get("schema_version", ""),
+        "assets": [],
+        "warnings": [],
+    }
+
+    previous_active = context.view_layer.objects.active
+    previous_selection = list(context.selected_objects)
+    previous_mode = previous_active.mode if previous_active is not None else "OBJECT"
+
+    if previous_active is not None and previous_active.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+    exported_paths = []
+    session_id = session_data.get("session_id", "")
+    for asset_data in session_data.get("assets", []):
+        asset_key = asset_data.get("asset_key", "")
+        canonical_root = _get_bp_canonical_root(session_id, asset_key)
+        if canonical_root is None:
+            raise RuntimeError(f"no_export_objects_for_asset:{asset_key}")
+
+        canonical_objects = _get_bp_canonical_objects(canonical_root)
+        export_objects = [canonical_root] + canonical_objects
+        mesh_objects = [obj for obj in canonical_objects if obj.type == "MESH"]
+        if not mesh_objects:
+            raise RuntimeError(f"no_export_objects_for_asset:{asset_key}")
+
+        asset_data["canonical_root_name"] = canonical_root.name
+        asset_data["canonical_object_names"] = [obj.name for obj in canonical_objects]
+        asset_data["source_object_names"] = list(asset_data["canonical_object_names"])
+
+        component_objects = _find_bp_session_objects(session_id, asset_key, Const.BP_STATIC_MESH_ROLE_COMPONENT_OBJECT)
+        warned_components = set()
+        for component_obj in component_objects:
+            canonical_name = component_obj.get(Const.BP_STATIC_MESH_PROP_CANONICAL_OBJECT_NAME, "")
+            canonical_obj = bpy.data.objects.get(canonical_name) if canonical_name else None
+            if canonical_obj is None:
+                continue
+            if _is_transform_dict_close(get_transform_from_obj(component_obj), get_transform_from_obj(canonical_obj)):
+                continue
+            component_key = component_obj.get(Const.BP_STATIC_MESH_PROP_COMPONENT_KEY, "")
+            if component_key in warned_components:
+                continue
+            warned_components.add(component_key)
+            export_log["warnings"].append({
+                "asset_key": asset_key,
+                "component_key": component_key,
+                "warning": "component_object_transform_drift_ignored",
+                "canonical_object_name": canonical_name,
+                "component_object_name": component_obj.name,
+            })
+
+        edited_fbx_path = asset_data.get("edited_fbx") or get_bp_static_mesh_edited_fbx(session_dir, asset_key)
+        ensure_directory(os.path.dirname(edited_fbx_path))
+
+        bpy.ops.object.select_all(action="DESELECT")
+        export_objects.sort(key=lambda obj: (obj.type != "MESH", obj.name))
+        for obj in export_objects:
+            obj.select_set(True)
+        context.view_layer.objects.active = mesh_objects[0]
+
+        bpy.ops.export_scene.fbx(
+            filepath=edited_fbx_path,
+            use_selection=True,
+            object_types={"MESH", "EMPTY"},
+            use_mesh_modifiers=True,
+            apply_unit_scale=True,
+            bake_space_transform=False,
+            axis_forward="-Z",
+            axis_up="Y",
+            add_leaf_bones=False,
+            path_mode="AUTO",
+        )
+
+        asset_data["edited_fbx"] = edited_fbx_path
+        asset_data["edited_object_names"] = [obj.name for obj in canonical_objects]
+        exported_paths.append(edited_fbx_path)
+        export_log["assets"].append({
+            "asset_key": asset_key,
+            "asset_path": asset_data.get("asset_path", ""),
+            "canonical_root_name": canonical_root.name,
+            "canonical_object_names": list(asset_data["canonical_object_names"]),
+            "edited_fbx": edited_fbx_path,
+            "edited_object_names": list(asset_data["edited_object_names"]),
+        })
+
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in previous_selection:
+        if obj.name in bpy.data.objects:
+            obj.select_set(True)
+    if previous_active is not None and previous_active.name in bpy.data.objects:
+        context.view_layer.objects.active = previous_active
+        if previous_mode != "OBJECT":
+            bpy.ops.object.mode_set(mode=previous_mode)
+
+    update_static_mesh_session_status(
+        session_data,
+        Const.STATIC_MESH_STATUS_EXPORTED_FROM_BLENDER,
+        "exported_from_blender",
+    )
+    save_static_mesh_session(session_file, session_data)
+    write_bp_static_mesh_log(session_file, 'export_blender.json', export_log)
+    return exported_paths
 def get_static_mesh_session_context(context):
     params = context.scene.ubio_params
     active_obj = context.active_object
@@ -394,7 +866,10 @@ def get_static_mesh_session_context(context):
 
 def import_static_mesh_session(session_file: str):
     session_data = load_static_mesh_session(session_file)
-    if session_data.get("session_type") != Const.STATIC_MESH_SESSION_TYPE:
+    session_type = session_data.get("session_type")
+    if session_type == Const.BP_STATIC_MESH_SESSION_TYPE:
+        return import_bp_static_mesh_session(session_file)
+    if session_type != Const.STATIC_MESH_SESSION_TYPE:
         raise ValueError("invalid_session_type")
 
     source_fbx = session_data.get("paths", {}).get("source_fbx")
@@ -457,6 +932,9 @@ def import_static_mesh_session(session_file: str):
 
 
 def export_static_mesh_session_to_fbx(context, session_file: str, session_data: dict):
+    if session_data.get("session_type") == Const.BP_STATIC_MESH_SESSION_TYPE:
+        return export_bp_static_mesh_session_to_fbx(context, session_file, session_data)
+
     session_id = session_data.get("session_id", "")
     export_objects = [
         obj
@@ -639,9 +1117,10 @@ class UBIO_OT_ExportStaticMeshSession(bpy.types.Operator):
 
         try:
             session_data = load_static_mesh_session(session_file)
-            edited_fbx_path = export_static_mesh_session_to_fbx(context, session_file, session_data)
+            export_result = export_static_mesh_session_to_fbx(context, session_file, session_data)
         except RuntimeError as exc:
-            if str(exc) == "no_export_objects":
+            error_text = str(exc)
+            if error_text == "no_export_objects" or error_text.startswith("no_export_objects_for_asset:"):
                 self.report({"ERROR"}, tr("report.static_mesh.no_export_objects"))
                 return {"CANCELLED"}
             self.report({"ERROR"}, tr("report.static_mesh.export_failed"))
@@ -653,13 +1132,20 @@ class UBIO_OT_ExportStaticMeshSession(bpy.types.Operator):
         params.ubio_static_mesh_session_path = session_file
         if source_obj is not None:
             source_obj.select_set(True)
-        self.report(
-            {"INFO"},
-            tr(
+        if isinstance(export_result, list):
+            success_path = export_result[0] if export_result else session_file
+            message = tr(
+                "report.bp_static_mesh.export_success",
+                count=len(export_result),
+                path=success_path,
+            )
+        else:
+            success_path = export_result
+            message = tr(
                 "report.static_mesh.export_success",
-                path=edited_fbx_path,
-            ),
-        )
+                path=success_path,
+            )
+        self.report({"INFO"}, message)
         return {"FINISHED"}
 
 

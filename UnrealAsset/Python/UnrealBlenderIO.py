@@ -2,21 +2,29 @@ import unreal
 import os
 import json
 import traceback
+import hashlib
 from datetime import datetime
 #constants
 DEFAULT_IO_TEMP_DIR = r"C:\Temp\UBIO"
 STATIC_MESH_SESSION_DIR = os.path.join(DEFAULT_IO_TEMP_DIR, "StaticMeshSessions")
+BP_STATIC_MESH_SESSION_DIR = os.path.join(DEFAULT_IO_TEMP_DIR, "BPStaticMeshSessions")
 STATIC_MESH_SESSION_FILE = "session.json"
 STATIC_MESH_SOURCE_FBX = "source.fbx"
 STATIC_MESH_EDITED_FBX = "edited.fbx"
+BP_STATIC_MESH_ASSETS_DIR_NAME = "assets"
+BP_STATIC_MESH_LOGS_DIR_NAME = "logs"
 STATIC_MESH_SESSION_TYPE = "static_mesh_roundtrip"
+BP_STATIC_MESH_SESSION_TYPE = "bp_static_mesh_roundtrip"
 STATIC_MESH_SCHEMA_VERSION = "1.0"
+BP_STATIC_MESH_SCHEMA_VERSION = "2.2"
 STATIC_MESH_STATUS_EXPORTED_FROM_UE = "EXPORTED_FROM_UE"
 STATIC_MESH_STATUS_IMPORTED_IN_BLENDER = "IMPORTED_IN_BLENDER"
 STATIC_MESH_STATUS_EXPORTED_FROM_BLENDER = "EXPORTED_FROM_BLENDER"
 STATIC_MESH_STATUS_REIMPORTED_IN_UE = "REIMPORTED_IN_UE"
+STATIC_MESH_STATUS_PARTIAL_FAILED = "PARTIAL_FAILED"
 STATIC_MESH_STATUS_FAILED = "FAILED"
 STATIC_MESH_LOG_PREFIX = "[UBIO StaticMesh]"
+BP_STATIC_MESH_LOG_PREFIX = "[UBIO BP StaticMesh]"
 BL_FLAG = "Blender"
 BL_NEW = "NewActor"
 BL_DEL = "Removed"
@@ -39,6 +47,14 @@ def log_static_mesh_error(message):
     unreal.log_error(f"{STATIC_MESH_LOG_PREFIX} {message}")
 
 
+def log_bp_static_mesh_info(message):
+    unreal.log(f"{BP_STATIC_MESH_LOG_PREFIX} {message}")
+
+
+def log_bp_static_mesh_error(message):
+    unreal.log_error(f"{BP_STATIC_MESH_LOG_PREFIX} {message}")
+
+
 def get_iso_timestamp():
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -52,6 +68,68 @@ def make_safe_name(value):
     safe = "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in str(value))
     safe = safe.strip("_")
     return safe or "StaticMesh"
+
+
+def make_short_hash(value, length=6):
+    return hashlib.md5(str(value).encode("utf-8")).hexdigest()[:length]
+
+
+def get_bp_static_mesh_assets_dir(session_dir):
+    return os.path.join(session_dir, BP_STATIC_MESH_ASSETS_DIR_NAME)
+
+
+def get_bp_static_mesh_logs_dir(session_dir):
+    return os.path.join(session_dir, BP_STATIC_MESH_LOGS_DIR_NAME)
+
+
+def get_bp_static_mesh_asset_dir(session_dir, asset_key):
+    return os.path.join(get_bp_static_mesh_assets_dir(session_dir), asset_key)
+
+
+def get_bp_static_mesh_source_fbx_path(session_dir, asset_key):
+    return os.path.join(get_bp_static_mesh_asset_dir(session_dir, asset_key), STATIC_MESH_SOURCE_FBX)
+
+
+def get_bp_static_mesh_edited_fbx_path(session_dir, asset_key):
+    return os.path.join(get_bp_static_mesh_asset_dir(session_dir, asset_key), STATIC_MESH_EDITED_FBX)
+
+
+def get_bp_static_mesh_log_path(session_dir, log_name):
+    return os.path.join(get_bp_static_mesh_logs_dir(session_dir), log_name)
+
+
+def write_bp_static_mesh_log(session_dir, log_name, payload):
+    log_path = get_bp_static_mesh_log_path(session_dir, log_name)
+    ensure_directory(os.path.dirname(log_path))
+    payload = dict(payload)
+    payload.setdefault("timestamp", get_iso_timestamp())
+    write_json_file(log_path, payload)
+    return log_path
+
+
+def build_transform_dict(location, rotation, scale):
+    return {
+        "location": {"x": float(location.x), "y": float(location.y), "z": float(location.z)},
+        "rotation": {"x": float(rotation.roll), "y": float(rotation.pitch), "z": float(rotation.yaw)},
+        "scale": {"x": float(scale.x), "y": float(scale.y), "z": float(scale.z)},
+    }
+
+
+def get_transform_dict_from_ue_transform(transform):
+    return build_transform_dict(
+        transform.translation,
+        transform.rotation.rotator(),
+        transform.scale3d,
+    )
+
+
+def get_component_transform_dict(component, world_space=False):
+    transform = component.get_world_transform() if world_space else component.get_relative_transform()
+    return get_transform_dict_from_ue_transform(transform)
+
+
+def get_actor_transform_dict(actor):
+    return get_transform_dict_from_ue_transform(actor.get_actor_transform())
 
 
 def get_session_file_path(session_dir):
@@ -76,17 +154,24 @@ def read_json_file(file_path):
         return json.load(f)
 
 
-def list_static_mesh_session_files():
-    if not os.path.isdir(STATIC_MESH_SESSION_DIR):
+def list_session_files_in_root(session_root):
+    if not os.path.isdir(session_root):
         return []
 
     session_files = []
-    for entry in os.scandir(STATIC_MESH_SESSION_DIR):
+    for entry in os.scandir(session_root):
         if not entry.is_dir():
             continue
         session_file = get_session_file_path(entry.path)
         if os.path.isfile(session_file):
             session_files.append(session_file)
+    return session_files
+
+
+def list_static_mesh_session_files():
+    session_files = []
+    for session_root in (STATIC_MESH_SESSION_DIR, BP_STATIC_MESH_SESSION_DIR):
+        session_files.extend(list_session_files_in_root(session_root))
 
     session_files.sort(key=os.path.getmtime, reverse=True)
     return session_files
@@ -99,21 +184,131 @@ def find_latest_static_mesh_session_file():
     return session_files[0]
 
 
+def get_default_bp_static_mesh_transform_dict():
+    return {
+        "location": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+    }
+
+
+def get_default_bp_static_mesh_import_policy():
+    return {
+        "root_at_world_origin": True,
+        "component_transform_mode": "ACTOR_LOCAL_BAKED",
+        "component_hierarchy_mode": "FLAT_UNDER_ROOT",
+        "instance_mode": "LINKED_DATA",
+        "canonical_storage": "INTERNAL_HIDDEN",
+    }
+
+
+def normalize_bp_static_mesh_session_data(session_data, session_dir):
+    session_data.setdefault("schema_version", BP_STATIC_MESH_SCHEMA_VERSION)
+    session_data.setdefault("assets", [])
+    session_data.setdefault("components", [])
+    session_data.setdefault("paths", {})
+    session_data.setdefault("source_actor", {})
+    session_data.setdefault("timestamps", {})
+    session_data["paths"].setdefault("assets_dir", get_bp_static_mesh_assets_dir(session_dir))
+    session_data["paths"].setdefault("logs_dir", get_bp_static_mesh_logs_dir(session_dir))
+
+    if "source_actor_world_transform" not in session_data and "root_transform" in session_data:
+        session_data["source_actor_world_transform"] = session_data.get("root_transform")
+    session_data.setdefault("source_actor_world_transform", get_default_bp_static_mesh_transform_dict())
+
+    import_policy = session_data.get("blender_import_policy")
+    if not isinstance(import_policy, dict):
+        import_policy = {}
+        session_data["blender_import_policy"] = import_policy
+    for key, value in get_default_bp_static_mesh_import_policy().items():
+        import_policy.setdefault(key, value)
+
+    for asset in session_data["assets"]:
+        asset_key = asset.get("asset_key", "")
+        if not asset_key:
+            continue
+        asset.setdefault("source_fbx", get_bp_static_mesh_source_fbx_path(session_dir, asset_key))
+        asset.setdefault("edited_fbx", get_bp_static_mesh_edited_fbx_path(session_dir, asset_key))
+        asset.setdefault("component_keys", [])
+        if "canonical_object_names" not in asset and "source_object_names" in asset:
+            asset["canonical_object_names"] = list(asset.get("source_object_names") or [])
+        asset.setdefault("canonical_object_names", [])
+        asset.setdefault("source_object_names", list(asset.get("canonical_object_names") or []))
+        asset.setdefault("edited_object_names", [])
+        asset.setdefault(
+            "canonical_root_name",
+            f"SRC_{make_safe_name(asset.get('asset_name') or asset_key or 'StaticMesh')}_ROOT",
+        )
+        asset.setdefault("reimport_status", "PENDING")
+
+    for component in session_data["components"]:
+        component.setdefault("component_name", component.get("component_key", ""))
+        component.setdefault("component_class", "StaticMeshComponent")
+        component.setdefault(
+            "actor_local_transform",
+            component.get("relative_transform", get_default_bp_static_mesh_transform_dict()),
+        )
+        component.setdefault("relative_transform", get_default_bp_static_mesh_transform_dict())
+        component.setdefault("world_transform", get_default_bp_static_mesh_transform_dict())
+        component.setdefault("parent_component_key", None)
+        component.setdefault("attach_chain", [component.get("component_name") or component.get("component_key") or ""])
+        component.setdefault("visible", True)
+
+    session_data["root_transform"] = session_data.get("source_actor_world_transform", get_default_bp_static_mesh_transform_dict())
+    return session_data
+
+
 def load_static_mesh_session(session_file):
     session_data = read_json_file(session_file)
     session_dir = os.path.dirname(session_file)
+    session_type = session_data.get("session_type", STATIC_MESH_SESSION_TYPE)
+    session_data.setdefault("session_type", session_type)
+    session_data.setdefault("timestamps", {})
+
+    if session_type == BP_STATIC_MESH_SESSION_TYPE:
+        return normalize_bp_static_mesh_session_data(session_data, session_dir)
+
     session_data.setdefault("schema_version", STATIC_MESH_SCHEMA_VERSION)
-    session_data.setdefault("session_type", STATIC_MESH_SESSION_TYPE)
     session_data.setdefault("paths", {})
     session_data["paths"].setdefault("source_fbx", get_static_mesh_source_fbx_path(session_dir))
     session_data["paths"].setdefault("edited_fbx", get_static_mesh_edited_fbx_path(session_dir))
-    session_data.setdefault("timestamps", {})
     return session_data
 
 
 def save_static_mesh_session(session_file, session_data):
     session_dir = os.path.dirname(session_file)
+    session_type = session_data.get("session_type", STATIC_MESH_SESSION_TYPE)
     session_data.setdefault("paths", {})
+
+    if session_type == BP_STATIC_MESH_SESSION_TYPE:
+        normalize_bp_static_mesh_session_data(session_data, session_dir)
+        session_data["paths"]["assets_dir"] = session_data["paths"].get(
+            "assets_dir", get_bp_static_mesh_assets_dir(session_dir)
+        )
+        session_data["paths"]["logs_dir"] = session_data["paths"].get(
+            "logs_dir", get_bp_static_mesh_logs_dir(session_dir)
+        )
+        session_data["root_transform"] = session_data.get(
+            "source_actor_world_transform", get_default_bp_static_mesh_transform_dict()
+        )
+        for asset in session_data.get("assets", []):
+            asset_key = asset.get("asset_key", "")
+            if not asset_key:
+                continue
+            asset["source_fbx"] = asset.get("source_fbx", get_bp_static_mesh_source_fbx_path(session_dir, asset_key))
+            asset["edited_fbx"] = asset.get("edited_fbx", get_bp_static_mesh_edited_fbx_path(session_dir, asset_key))
+            asset.setdefault("component_keys", [])
+            asset.setdefault("canonical_object_names", [])
+            asset["source_object_names"] = list(asset.get("canonical_object_names") or [])
+            asset.setdefault("edited_object_names", [])
+            asset.setdefault(
+                "canonical_root_name",
+                f"SRC_{make_safe_name(asset.get('asset_name') or asset_key or 'StaticMesh')}_ROOT",
+            )
+            asset.setdefault("reimport_status", "PENDING")
+        write_json_file(session_file, session_data)
+        return
+
     session_data["paths"]["source_fbx"] = session_data["paths"].get(
         "source_fbx", get_static_mesh_source_fbx_path(session_dir)
     )
@@ -156,14 +351,23 @@ def get_selected_static_mesh_source():
     if len(selected_actors) == 1:
         actor = selected_actors[0]
         static_mesh = get_static_mesh_from_actor(actor)
+        components = get_static_mesh_components_from_actor(actor)
         if static_mesh is not None:
-            log_static_mesh_info(
-                f"Resolved level actor selection: actor={actor.get_actor_label()} mesh={static_mesh.get_path_name()}"
-            )
+            selection_source = "level_actor"
+            if should_use_bp_static_mesh_roundtrip(actor, components):
+                selection_source = "bp_level_actor"
+                log_bp_static_mesh_info(
+                    f"Resolved Blueprint actor selection: actor={actor.get_actor_label()} components={len(components)}"
+                )
+            else:
+                log_static_mesh_info(
+                    f"Resolved level actor selection: actor={actor.get_actor_label()} mesh={static_mesh.get_path_name()}"
+                )
             return {
-                "selection_source": "level_actor",
+                "selection_source": selection_source,
                 "actor": actor,
                 "static_mesh": static_mesh,
+                "components": components,
             }
         log_static_mesh_info(
             f"Selected actor has no StaticMeshComponent/static mesh: {actor.get_actor_label()}"
@@ -191,6 +395,7 @@ def get_selected_static_mesh_source():
             "selection_source": "content_browser_asset",
             "actor": None,
             "static_mesh": static_mesh,
+            "components": [],
         }
 
     if len(static_mesh_assets) > 1:
@@ -246,6 +451,188 @@ def build_static_mesh_session_data(actor, static_mesh, session_id, session_dir, 
             "reimported_in_ue": None,
         },
     }
+
+
+def get_component_parent_key(component, selected_component_names):
+    parent_component = component.get_attach_parent()
+    while parent_component is not None:
+        parent_name = str(parent_component.get_name())
+        if parent_name in selected_component_names:
+            return parent_name
+        parent_component = parent_component.get_attach_parent()
+    return None
+
+
+def get_component_attach_chain(component):
+    chain = []
+    cursor = component
+    while cursor is not None:
+        chain.append(str(cursor.get_name()))
+        cursor = cursor.get_attach_parent()
+    chain.reverse()
+    return chain
+
+
+def get_component_actor_local_transform_dict(actor, component):
+    actor_world_transform = actor.get_actor_transform()
+    component_world_transform = component.get_world_transform()
+    return get_transform_dict_from_ue_transform(component_world_transform.make_relative(actor_world_transform))
+
+
+def get_static_mesh_components_from_actor(actor):
+    if actor is None:
+        return []
+
+    raw_components = actor.get_components_by_class(unreal.StaticMeshComponent) or []
+    selected_names = []
+    valid_components = []
+    for component in raw_components:
+        static_mesh = component.get_editor_property("static_mesh")
+        if static_mesh is None:
+            continue
+        component_name = str(component.get_name())
+        selected_names.append(component_name)
+        valid_components.append((component_name, component, static_mesh))
+
+    component_records = []
+    for component_name, component, static_mesh in valid_components:
+        actor_local_transform = get_component_actor_local_transform_dict(actor, component)
+        if actor_local_transform is None:
+            raise RuntimeError(f"missing_actor_local_transform:{component_name}")
+        component_records.append({
+            "component_name": component_name,
+            "component": component,
+            "static_mesh": static_mesh,
+            "asset_path": str(static_mesh.get_path_name()),
+            "relative_transform": get_component_transform_dict(component, world_space=False),
+            "world_transform": get_component_transform_dict(component, world_space=True),
+            "actor_local_transform": actor_local_transform,
+            "parent_component_key": get_component_parent_key(component, selected_names),
+            "attach_chain": get_component_attach_chain(component),
+            "visible": bool(component.is_visible()),
+        })
+    return component_records
+
+
+def should_use_bp_static_mesh_roundtrip(actor, components=None):
+    if actor is None:
+        return False
+    components = components if components is not None else get_static_mesh_components_from_actor(actor)
+    if len(components) > 1:
+        return True
+    class_name = actor.get_class().get_name()
+    return class_name.endswith("_C") and len(components) >= 1
+
+
+def build_bp_static_mesh_session_data(actor, components, session_id, session_dir):
+    if actor is None:
+        raise RuntimeError("bp_actor_required")
+    if not components:
+        raise RuntimeError("bp_actor_has_no_static_mesh_components")
+
+    actor_label = str(actor.get_actor_label())
+    actor_guid = str(actor.actor_guid)
+    actor_class_path = actor.get_class().get_path_name()
+    source_actor_world_transform = get_actor_transform_dict(actor)
+    asset_records = []
+    asset_map = {}
+    component_records = []
+    export_log_assets = []
+    export_log_components = []
+
+    for component_info in components:
+        component_name = component_info["component_name"]
+        asset_path = component_info["asset_path"]
+        asset_name = str(component_info["static_mesh"].get_name())
+        asset_key = f"{make_safe_name(asset_name).lower()}_{make_short_hash(asset_path)}"
+        component_key = component_name
+
+        if asset_key not in asset_map:
+            asset_record = {
+                "asset_key": asset_key,
+                "asset_name": asset_name,
+                "asset_path": asset_path,
+                "source_fbx": get_bp_static_mesh_source_fbx_path(session_dir, asset_key),
+                "edited_fbx": get_bp_static_mesh_edited_fbx_path(session_dir, asset_key),
+                "component_keys": [],
+                "canonical_root_name": f"SRC_{make_safe_name(asset_name)}_ROOT",
+                "canonical_object_names": [],
+                "source_object_names": [],
+                "edited_object_names": [],
+                "reimport_status": "PENDING",
+            }
+            asset_map[asset_key] = asset_record
+            asset_records.append(asset_record)
+        asset_map[asset_key]["component_keys"].append(component_key)
+
+        component_record = {
+            "component_key": component_key,
+            "component_name": component_name,
+            "component_class": "StaticMeshComponent",
+            "asset_key": asset_key,
+            "parent_component_key": component_info["parent_component_key"],
+            "actor_local_transform": component_info["actor_local_transform"],
+            "relative_transform": component_info["relative_transform"],
+            "world_transform": component_info["world_transform"],
+            "attach_chain": component_info["attach_chain"],
+            "visible": component_info["visible"],
+        }
+        component_records.append(component_record)
+        export_log_components.append(dict(component_record))
+
+    for asset_record in asset_records:
+        export_log_assets.append({
+            "asset_key": asset_record["asset_key"],
+            "asset_path": asset_record["asset_path"],
+            "source_fbx": asset_record["source_fbx"],
+            "component_keys": list(asset_record["component_keys"]),
+            "canonical_root_name": asset_record["canonical_root_name"],
+        })
+
+    session_data = {
+        "schema_version": BP_STATIC_MESH_SCHEMA_VERSION,
+        "session_type": BP_STATIC_MESH_SESSION_TYPE,
+        "session_id": session_id,
+        "ue_version": str(unreal.SystemLibrary.get_engine_version()),
+        "blender_version": "5.0",
+        "status": STATIC_MESH_STATUS_EXPORTED_FROM_UE,
+        "selection_source": "bp_level_actor",
+        "source_actor": {
+            "label": actor_label,
+            "guid": actor_guid,
+            "class_path": actor_class_path,
+        },
+        "source_actor_world_transform": source_actor_world_transform,
+        "root_transform": source_actor_world_transform,
+        "blender_import_policy": get_default_bp_static_mesh_import_policy(),
+        "assets": asset_records,
+        "components": component_records,
+        "paths": {
+            "assets_dir": get_bp_static_mesh_assets_dir(session_dir),
+            "logs_dir": get_bp_static_mesh_logs_dir(session_dir),
+        },
+        "timestamps": {
+            "exported_from_ue": get_iso_timestamp(),
+            "imported_in_blender": None,
+            "exported_from_blender": None,
+            "reimported_in_ue": None,
+        },
+    }
+    export_log = {
+        "session_id": session_id,
+        "source_actor": {
+            "label": actor_label,
+            "guid": actor_guid,
+            "class_path": actor_class_path,
+        },
+        "source_actor_world_transform": source_actor_world_transform,
+        "blender_import_policy": get_default_bp_static_mesh_import_policy(),
+        "component_count": len(component_records),
+        "asset_count": len(asset_records),
+        "assets": export_log_assets,
+        "components": export_log_components,
+    }
+    return session_data, export_log
 
 
 def export_static_mesh_asset_to_fbx(static_mesh, output_fbx_path):
@@ -828,6 +1215,56 @@ def import_json(file_path):
     return
 
 
+def ubio_export_selected_bp_static_meshes_to_blender(actor=None):
+    try:
+        log_bp_static_mesh_info("ubio_export_selected_bp_static_meshes_to_blender started")
+        if actor is None:
+            selected_actors = actor_subsys.get_selected_level_actors()
+            if len(selected_actors) != 1:
+                raise RuntimeError("expected_single_selected_actor")
+            actor = selected_actors[0]
+
+        components = get_static_mesh_components_from_actor(actor)
+        if not components:
+            raise RuntimeError("bp_actor_has_no_static_mesh_components")
+
+        actor_label = actor.get_actor_label()
+        session_suffix = make_safe_name(actor_label)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_id = f"{timestamp}_BP_{session_suffix}"
+        session_dir = ensure_directory(os.path.join(BP_STATIC_MESH_SESSION_DIR, session_id))
+        session_file_path = get_session_file_path(session_dir)
+
+        session_data, export_log = build_bp_static_mesh_session_data(
+            actor,
+            components,
+            session_id,
+            session_dir,
+        )
+
+        ensure_directory(get_bp_static_mesh_assets_dir(session_dir))
+        ensure_directory(get_bp_static_mesh_logs_dir(session_dir))
+
+        for asset_record in session_data.get("assets", []):
+            asset_path = asset_record.get("asset_path", "")
+            static_mesh = unreal.load_asset(asset_path)
+            if static_mesh is None:
+                raise RuntimeError(f"source_asset_not_found: {asset_path}")
+            export_static_mesh_asset_to_fbx(static_mesh, asset_record["source_fbx"])
+
+        save_static_mesh_session(session_file_path, session_data)
+        write_bp_static_mesh_log(session_dir, 'export_ue.json', export_log)
+
+        log_bp_static_mesh_info(
+            f"BP StaticMesh session exported successfully: actor={actor_label} components={len(components)} assets={len(session_data.get('assets', []))} session={session_file_path}"
+        )
+        return session_file_path
+    except Exception as exc:
+        log_bp_static_mesh_error(f"Export Blueprint StaticMesh session failed: {exc}")
+        log_bp_static_mesh_error(traceback.format_exc())
+        return None
+
+
 def ubio_export_selected_static_mesh_to_blender():
     try:
         log_static_mesh_info("ubio_export_selected_static_mesh_to_blender started")
@@ -835,6 +1272,8 @@ def ubio_export_selected_static_mesh_to_blender():
         actor = selection["actor"]
         static_mesh = selection["static_mesh"]
         selection_source = selection["selection_source"]
+        if selection_source == "bp_level_actor":
+            return ubio_export_selected_bp_static_meshes_to_blender(actor=actor)
         session_suffix = make_safe_name(static_mesh.get_name())
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         session_id = f"{timestamp}_{session_suffix}"
@@ -863,6 +1302,84 @@ def ubio_export_selected_static_mesh_to_blender():
         return None
 
 
+def ubio_reimport_bp_static_meshes_from_blender(session_file_path=""):
+    session_file = session_file_path or ""
+    try:
+        session_file = session_file_path or find_latest_static_mesh_session_file()
+        if not session_file or not os.path.isfile(session_file):
+            raise RuntimeError("static_mesh_session_not_found")
+
+        session_data = load_static_mesh_session(session_file)
+        if session_data.get("session_type") != BP_STATIC_MESH_SESSION_TYPE:
+            raise RuntimeError("invalid_bp_static_mesh_session")
+
+        session_dir = os.path.dirname(session_file)
+        reimport_log = {
+            "session_id": session_data.get("session_id", ""),
+            "assets": [],
+        }
+        success_count = 0
+        failed_count = 0
+
+        for asset_data in session_data.get("assets", []):
+            asset_key = asset_data.get("asset_key", "")
+            asset_path = asset_data.get("asset_path", "")
+            edited_fbx_path = asset_data.get("edited_fbx", "")
+            log_item = {
+                "asset_key": asset_key,
+                "asset_path": asset_path,
+                "edited_fbx": edited_fbx_path,
+            }
+
+            try:
+                if not edited_fbx_path or not os.path.isfile(edited_fbx_path):
+                    raise RuntimeError(f"edited_fbx_missing: {edited_fbx_path}")
+                source_asset = unreal.load_asset(asset_path)
+                if source_asset is None:
+                    raise RuntimeError(f"source_asset_not_found: {asset_path}")
+                reimport_static_mesh_from_fbx(asset_path, edited_fbx_path)
+                asset_data["reimport_status"] = "REIMPORTED"
+                log_item["status"] = "REIMPORTED"
+                success_count += 1
+            except Exception as asset_exc:
+                asset_data["reimport_status"] = "FAILED"
+                log_item["status"] = "FAILED"
+                log_item["error"] = str(asset_exc)
+                failed_count += 1
+            reimport_log["assets"].append(log_item)
+
+        final_status = STATIC_MESH_STATUS_REIMPORTED_IN_UE if failed_count == 0 else STATIC_MESH_STATUS_PARTIAL_FAILED
+        update_static_mesh_session_status(
+            session_data,
+            final_status,
+            "reimported_in_ue",
+        )
+        save_static_mesh_session(session_file, session_data)
+        reimport_log["status"] = final_status
+        reimport_log["success_count"] = success_count
+        reimport_log["failed_count"] = failed_count
+        write_bp_static_mesh_log(session_dir, 'reimport_ue.json', reimport_log)
+        log_bp_static_mesh_info(
+            f"BP StaticMesh reimport finished: session={session_file} success={success_count} failed={failed_count}"
+        )
+        return session_file
+    except Exception as exc:
+        log_bp_static_mesh_error(f"Reimport Blueprint StaticMesh session failed: {exc}")
+        if session_file and os.path.isfile(session_file):
+            try:
+                failed_session = load_static_mesh_session(session_file)
+                update_static_mesh_session_status(
+                    failed_session,
+                    STATIC_MESH_STATUS_FAILED,
+                    "reimported_in_ue",
+                )
+                save_static_mesh_session(session_file, failed_session)
+            except Exception:
+                pass
+        log_bp_static_mesh_error(traceback.format_exc())
+        return None
+
+
 def ubio_reimport_static_mesh_from_blender(session_file_path=""):
     session_file = session_file_path or ""
     try:
@@ -871,6 +1388,8 @@ def ubio_reimport_static_mesh_from_blender(session_file_path=""):
             raise RuntimeError("static_mesh_session_not_found")
 
         session_data = load_static_mesh_session(session_file)
+        if session_data.get("session_type") == BP_STATIC_MESH_SESSION_TYPE:
+            return ubio_reimport_bp_static_meshes_from_blender(session_file)
         if session_data.get("session_type") != STATIC_MESH_SESSION_TYPE:
             raise RuntimeError("invalid_static_mesh_session")
 
