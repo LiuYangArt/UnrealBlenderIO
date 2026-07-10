@@ -799,20 +799,27 @@ def export_bp_static_mesh_session_to_fbx(context, session_file: str, session_dat
         export_objects.sort(key=lambda obj: (obj.type != "MESH", obj.name))
         for obj in export_objects:
             obj.select_set(True)
-        context.view_layer.objects.active = mesh_objects[0]
+        active_export_object = mesh_objects[0]
+        context.view_layer.objects.active = active_export_object
 
-        bpy.ops.export_scene.fbx(
-            filepath=edited_fbx_path,
-            use_selection=True,
-            object_types={"MESH", "EMPTY"},
-            use_mesh_modifiers=True,
-            apply_unit_scale=True,
-            bake_space_transform=False,
-            axis_forward="-Z",
-            axis_up="Y",
-            add_leaf_bones=False,
-            path_mode="AUTO",
-        )
+        with context.temp_override(
+            active_object=active_export_object,
+            object=active_export_object,
+            selected_objects=export_objects,
+            selected_editable_objects=export_objects,
+        ):
+            bpy.ops.export_scene.fbx(
+                filepath=edited_fbx_path,
+                use_selection=True,
+                object_types={"MESH", "EMPTY"},
+                use_mesh_modifiers=True,
+                apply_unit_scale=True,
+                bake_space_transform=False,
+                axis_forward="-Z",
+                axis_up="Y",
+                add_leaf_bones=False,
+                path_mode="AUTO",
+            )
 
         asset_data["edited_fbx"] = edited_fbx_path
         asset_data["edited_object_names"] = [obj.name for obj in canonical_objects]
