@@ -12,7 +12,7 @@ from .util import (
     build_bp_static_mesh_asset_collection_name,
     build_bp_static_mesh_collection_name,
     build_static_mesh_collection_name,
-    clean_ubio_temp_dir,
+
     ensure_directory,
     find_latest_static_mesh_session_file,
     find_static_mesh_session_objects,
@@ -1066,50 +1066,51 @@ class UBIO_OT_ImportLatestStaticMeshSession(bpy.types.Operator):
         return self.execute(context)
 
 
-class UBIO_OT_ImportStaticMeshSession(bpy.types.Operator):
-    bl_idname = "ubio.import_static_mesh_session"
-    bl_label = msgid("op.import_static_mesh.label")
-    bl_description = msgid("op.import_static_mesh.desc")
-    bl_options = {"UNDO"}
-
-    def execute(self, context):
-        params = context.scene.ubio_params
-        session_path = params.ubio_static_mesh_session_path
-        if not session_path or not os.path.isfile(session_path):
-            self.report(
-                {"ERROR"},
-                tr("report.static_mesh.session_file_not_found", path=session_path),
-            )
-            return {"CANCELLED"}
-
-        try:
-            session_data, imported_objs = import_static_mesh_session(session_path)
-        except FileNotFoundError as exc:
-            self.report(
-                {"ERROR"},
-                tr("report.static_mesh.source_fbx_not_found", path=str(exc)),
-            )
-            return {"CANCELLED"}
-        except ValueError:
-            self.report({"ERROR"}, tr("report.static_mesh.invalid_session_type"))
-            return {"CANCELLED"}
-        except Exception:
-            self.report({"ERROR"}, tr("report.static_mesh.import_failed"))
-            return {"CANCELLED"}
-
-        for obj in imported_objs:
-            obj.select_set(True)
-        context.view_layer.objects.active = imported_objs[0]
-        self.report(
-            {"INFO"},
-            tr(
-                "report.static_mesh.import_success",
-                session_id=session_data.get("session_id", ""),
-            ),
-        )
-        return {"FINISHED"}
-
-
+# Disabled: manual session import operator removed from simplified UI.
+# class UBIO_OT_ImportStaticMeshSession(bpy.types.Operator):
+#     bl_idname = "ubio.import_static_mesh_session"
+#     bl_label = msgid("op.import_static_mesh.label")
+#     bl_description = msgid("op.import_static_mesh.desc")
+#     bl_options = {"UNDO"}
+#
+#     def execute(self, context):
+#         params = context.scene.ubio_params
+#         session_path = params.ubio_static_mesh_session_path
+#         if not session_path or not os.path.isfile(session_path):
+#             self.report(
+#                 {"ERROR"},
+#                 tr("report.static_mesh.session_file_not_found", path=session_path),
+#             )
+#             return {"CANCELLED"}
+#
+#         try:
+#             session_data, imported_objs = import_static_mesh_session(session_path)
+#         except FileNotFoundError as exc:
+#             self.report(
+#                 {"ERROR"},
+#                 tr("report.static_mesh.source_fbx_not_found", path=str(exc)),
+#             )
+#             return {"CANCELLED"}
+#         except ValueError:
+#             self.report({"ERROR"}, tr("report.static_mesh.invalid_session_type"))
+#             return {"CANCELLED"}
+#         except Exception:
+#             self.report({"ERROR"}, tr("report.static_mesh.import_failed"))
+#             return {"CANCELLED"}
+#
+#         for obj in imported_objs:
+#             obj.select_set(True)
+#         context.view_layer.objects.active = imported_objs[0]
+#         self.report(
+#             {"INFO"},
+#             tr(
+#                 "report.static_mesh.import_success",
+#                 session_id=session_data.get("session_id", ""),
+#             ),
+#         )
+#         return {"FINISHED"}
+#
+#
 class UBIO_OT_ExportStaticMeshSession(bpy.types.Operator):
     bl_idname = "ubio.export_static_mesh_session"
     bl_label = msgid("op.export_static_mesh.label")
@@ -1173,18 +1174,22 @@ class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
         if not json_path or not os.path.exists(json_path):
             self.report({"ERROR"}, tr("report.import_latest.invalid_json_path"))
             return {"CANCELLED"}
+
         params = context.scene.ubio_params
-        params.ubio_json_path = json_path # UI路径修改时自动触发导入
+        params.ubio_json_path = json_path
 
+        fbx_path = os.path.splitext(json_path)[0] + ".fbx"
+        if not os.path.exists(fbx_path):
+            self.report({"ERROR"}, tr("report.import_scene.fbx_not_found", path=fbx_path))
+            return {"CANCELLED"}
+        if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
+            self.report({"WARNING"}, tr("report.import_scene.unit_not_cm"))
 
-        # if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
-        #     self.report({"WARNING"}, "Blender单位不是厘米，可能会导致比例不一致")
+        ubio_collection = import_json_scene(json_path)
+        if ubio_collection is None:
+            self.report({"ERROR"}, tr("report.import_scene.failed"))
+            return {"CANCELLED"}
 
-        # # ubio_collection = import_json_scene(json_path)
-        # # if ubio_collection is None:
-        # #     self.report({"ERROR"}, "导入场景失败")
-        # #     return {"CANCELLED"}
-        # else:
         self.report(
             {"INFO"},
             tr("report.import_latest.success", filename=os.path.basename(json_path)),
@@ -1224,58 +1229,58 @@ class UBIO_OT_ImportLatestUnrealScene(bpy.types.Operator):
 
 
 
-class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
-    bl_idname = "ubio.import_unreal_scene"
-    bl_label = msgid("op.import_scene.label")
-    bl_description = msgid("op.import_scene.desc")
-    bl_options = {"UNDO"}
-
-    def execute(self, context):
-        params = context.scene.ubio_params
-        json_path = params.ubio_json_path
-        with open(json_path, "r") as f:
-            json_scene_data = json.load(f)
-        fbx_path = os.path.splitext(json_path)[0] + ".fbx"
-        if not os.path.exists(fbx_path):
-            self.report({"ERROR"}, tr("report.import_scene.fbx_not_found", path=fbx_path))
-            return {"CANCELLED"}
-        if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
-            self.report({"WARNING"}, tr("report.import_scene.unit_not_cm"))
-        # 使用新函数
-        ubio_collection=import_json_scene(json_path)
-        if ubio_collection is None:
-            self.report({"ERROR"}, tr("report.import_scene.failed"))
-            return {"CANCELLED"}
-        else:      
-            self.report({"INFO"}, tr("report.import_scene.success", filename=os.path.basename(json_path)))
-        return {"FINISHED"}
-
-    def invoke(self, context, event):
-        params = context.scene.ubio_params
-        json_path = params.ubio_json_path
-        if not os.path.exists(json_path):
-            self.report({"ERROR"}, tr("report.import_scene.json_not_found", path=json_path))
-            return {"CANCELLED"}
-        if not json_path.lower().endswith(".json"):
-            self.report({"ERROR"}, tr("report.import_scene.json_ext_invalid"))
-            return {"CANCELLED"}
-        with open(json_path, "r") as f:
-            json_scene_data = json.load(f)
-        main_level = json_scene_data.get("main_level", None)
-        level_path = json_scene_data.get("level_path", None)
-        main_level_name = get_name_from_ue_path(main_level)
-        if main_level == level_path:
-            level_path_name = Const.MAINLEVEL
-        else:
-            level_path_name = get_name_from_ue_path(level_path)
-        ubio_coll = bpy.data.collections.get(Const.UECOLL)
-        main_level_coll = bpy.data.collections.get(main_level_name)
-        if ubio_coll and main_level_coll:
-            clear_imported_scene(ubio_coll, main_level_coll)
-        return self.execute(context)
-
-
-
+# class UBIO_OT_ImportUnrealScene(bpy.types.Operator):
+#     bl_idname = "ubio.import_unreal_scene"
+#     bl_label = msgid("op.import_scene.label")
+#     bl_description = msgid("op.import_scene.desc")
+#     bl_options = {"UNDO"}
+#
+#     def execute(self, context):
+#         params = context.scene.ubio_params
+#         json_path = params.ubio_json_path
+#         with open(json_path, "r") as f:
+#             json_scene_data = json.load(f)
+#         fbx_path = os.path.splitext(json_path)[0] + ".fbx"
+#         if not os.path.exists(fbx_path):
+#             self.report({"ERROR"}, tr("report.import_scene.fbx_not_found", path=fbx_path))
+#             return {"CANCELLED"}
+#         if bpy.context.scene.unit_settings.length_unit != "CENTIMETERS":
+#             self.report({"WARNING"}, tr("report.import_scene.unit_not_cm"))
+#         # 使用新函数
+#         ubio_collection=import_json_scene(json_path)
+#         if ubio_collection is None:
+#             self.report({"ERROR"}, tr("report.import_scene.failed"))
+#             return {"CANCELLED"}
+#         else:
+#             self.report({"INFO"}, tr("report.import_scene.success", filename=os.path.basename(json_path)))
+#         return {"FINISHED"}
+#
+#     def invoke(self, context, event):
+#         params = context.scene.ubio_params
+#         json_path = params.ubio_json_path
+#         if not os.path.exists(json_path):
+#             self.report({"ERROR"}, tr("report.import_scene.json_not_found", path=json_path))
+#             return {"CANCELLED"}
+#         if not json_path.lower().endswith(".json"):
+#             self.report({"ERROR"}, tr("report.import_scene.json_ext_invalid"))
+#             return {"CANCELLED"}
+#         with open(json_path, "r") as f:
+#             json_scene_data = json.load(f)
+#         main_level = json_scene_data.get("main_level", None)
+#         level_path = json_scene_data.get("level_path", None)
+#         main_level_name = get_name_from_ue_path(main_level)
+#         if main_level == level_path:
+#             level_path_name = Const.MAINLEVEL
+#         else:
+#             level_path_name = get_name_from_ue_path(level_path)
+#         ubio_coll = bpy.data.collections.get(Const.UECOLL)
+#         main_level_coll = bpy.data.collections.get(main_level_name)
+#         if ubio_coll and main_level_coll:
+#             clear_imported_scene(ubio_coll, main_level_coll)
+#         return self.execute(context)
+#
+#
+#
 class UBIO_OT_ExportUnrealJSON(bpy.types.Operator):
     bl_idname = "ubio.export_unreal_scene_json"
     bl_label = msgid("op.export_json.label")
@@ -1402,34 +1407,35 @@ class UBIO_OT_ExportUnrealJSON(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class UBIO_OT_CleanTempFiles(bpy.types.Operator):
-    bl_idname = "ubio.clean_tempfiles"
-    bl_label = msgid("op.clean_temp.label")
-    bl_description = msgid("op.clean_temp.desc")
-
-    def execute(self, context):
-        try:
-            dir_path, removed_count = clean_ubio_temp_dir()
-        except Exception as exc:
-            self.report(
-                {"ERROR"},
-                tr("report.clean_temp.failed", path=Const.DEFAULT_IO_TEMP_DIR, error=str(exc)),
-            )
-            return {"CANCELLED"}
-
-        self.report({"INFO"}, tr("report.clean_temp.done", path=dir_path, count=removed_count))
-        return {"FINISHED"}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# Disabled: manual temp cleanup operator removed from simplified UI.
+# class UBIO_OT_CleanTempFiles(bpy.types.Operator):
+#     bl_idname = "ubio.clean_tempfiles"
+#     bl_label = msgid("op.clean_temp.label")
+#     bl_description = msgid("op.clean_temp.desc")
+#
+#     def execute(self, context):
+#         try:
+#             dir_path, removed_count = clean_ubio_temp_dir()
+#         except Exception as exc:
+#             self.report(
+#                 {"ERROR"},
+#                 tr("report.clean_temp.failed", path=Const.DEFAULT_IO_TEMP_DIR, error=str(exc)),
+#             )
+#             return {"CANCELLED"}
+#
+#         self.report({"INFO"}, tr("report.clean_temp.done", path=dir_path, count=removed_count))
+#         return {"FINISHED"}
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
