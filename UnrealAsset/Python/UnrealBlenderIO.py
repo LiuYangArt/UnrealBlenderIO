@@ -646,7 +646,7 @@ def export_static_mesh_asset_to_fbx(static_mesh, output_fbx_path):
     export_options.export_source_mesh = True
     export_options.vertex_color = True
     export_options.level_of_detail = False
-    export_options.collision = False
+    export_options.collision = True
 
     export_task = unreal.AssetExportTask()
     export_task.object = static_mesh
@@ -689,7 +689,8 @@ def build_static_mesh_import_options():
 
     static_mesh_import_data = options.get_editor_property("static_mesh_import_data")
     static_mesh_import_data.set_editor_property("combine_meshes", True)
-    static_mesh_import_data.set_editor_property("auto_generate_collision", False)
+    static_mesh_import_data.set_editor_property("auto_generate_collision", True)
+    static_mesh_import_data.set_editor_property("one_convex_hull_per_ucx", True)
     static_mesh_import_data.set_editor_property(
         "vertex_color_import_option",
         unreal.VertexColorImportOption.REPLACE,

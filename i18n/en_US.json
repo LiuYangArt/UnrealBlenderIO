@@ -90,5 +90,16 @@
     "op.clean_temp.desc": "Clean all files under the UBIO temp directory",
     "report.clean_temp.done": "UBIO temp directory cleaned: {path} ({count} entries removed)",
     "report.clean_temp.failed": "Failed to clean UBIO temp directory: {path} ({error})",
-    "report.bp_static_mesh.export_success": "Exported {count} Blueprint asset FBX files. First file: {path}"
+    "report.bp_static_mesh.export_success": "Exported {count} Blueprint asset FBX files. First file: {path}",
+    "op.make_collision.label": "Set as Unreal Collision",
+    "op.make_collision.desc": "Bind the selected regular meshes as custom convex collision for one UBIO StaticMesh",
+    "report.collision.need_two_meshes": "Select two meshes: one regular collision mesh and one UBIO StaticMesh",
+    "report.collision.need_one_ubio_mesh": "The selection must contain exactly one UBIO StaticMesh and at least one regular mesh",
+    "report.collision.created": "UBIO collision created: {name}",
+    "report.collision.empty_mesh": "The collision mesh has no faces",
+    "report.collision.canonical_not_found": "The source StaticMesh for this Blueprint component was not found",
+    "report.collision.need_meshes": "Select one UBIO StaticMesh and at least one regular collision mesh",
+    "report.collision.created_many": "Created {count} UBIO collision meshes",
+    "prop.import_collision.name": "Import Collision",
+    "prop.import_collision.desc": "Import custom collision meshes included with the Unreal StaticMesh"
 }

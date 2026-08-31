@@ -90,5 +90,16 @@
     "op.clean_temp.desc": "清理 UBIO 临时目录下的全部文件",
     "report.clean_temp.done": "已清理 UBIO 临时目录: {path}（删除 {count} 个条目）",
     "report.clean_temp.failed": "清理 UBIO 临时目录失败: {path}（{error}）",
-    "report.bp_static_mesh.export_success": "已导出 {count} 个 Blueprint 资产 FBX，首个文件: {path}"
+    "report.bp_static_mesh.export_success": "已导出 {count} 个 Blueprint 资产 FBX，首个文件: {path}",
+    "op.make_collision.label": "设为 Unreal 碰撞",
+    "op.make_collision.desc": "将选中的多个普通网格绑定为单个 UBIO StaticMesh 的自定义凸碰撞",
+    "report.collision.need_two_meshes": "请选择两个网格：一个普通碰撞网格和一个 UBIO StaticMesh",
+    "report.collision.need_one_ubio_mesh": "选择中必须恰好包含一个 UBIO StaticMesh 和至少一个普通网格",
+    "report.collision.created": "已创建 UBIO 碰撞：{name}",
+    "report.collision.empty_mesh": "碰撞网格没有任何面",
+    "report.collision.canonical_not_found": "找不到该 Blueprint 组件对应的源 StaticMesh",
+    "report.collision.need_meshes": "请选择一个 UBIO StaticMesh 和至少一个普通碰撞网格",
+    "report.collision.created_many": "已创建 {count} 个 UBIO 碰撞",
+    "prop.import_collision.name": "导入碰撞",
+    "prop.import_collision.desc": "导入 Unreal StaticMesh 随附的自定义碰撞网格"
 }

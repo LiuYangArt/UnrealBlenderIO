@@ -3,6 +3,7 @@ import os
 import random
 import json
 from mathutils import Color
+from bpy.props import BoolProperty
 # import blf
 # from mathutils import Vector
 # from math import radians
@@ -36,6 +37,13 @@ from .util import (
     Const
 )
 from .i18n import msgid, tr
+from .collision import (
+    collision_prefix,
+    create_component_collision,
+    is_ue_collision_object,
+    reconcile_component_collisions,
+    set_collision_target,
+)
 # from .Toolsl import UBIOAddProxyPivotOperator, UBIOMirrorCopyActorsOperator
 
 
@@ -495,6 +503,67 @@ def _get_bp_canonical_objects(canonical_root: bpy.types.Object) -> list[bpy.type
     return canonical_objects
 
 
+def _get_bp_canonical_collisions(canonical_root: bpy.types.Object) -> list[bpy.types.Object]:
+    collisions = [
+        obj for obj in get_all_children(canonical_root)
+        if obj.get(Const.BP_STATIC_MESH_PROP_COLLECTION_ROLE) == Const.BP_STATIC_MESH_ROLE_CANONICAL_COLLISION
+    ]
+    collisions.sort(key=lambda obj: obj.name)
+    return collisions
+
+
+def _get_collision_objects_for_target(target_obj: bpy.types.Object) -> list[bpy.types.Object]:
+    collisions = [
+        obj for obj in bpy.data.objects
+        if obj.type == "MESH"
+        and obj.get(Const.STATIC_MESH_PROP_COLLISION_TARGET_NAME) == target_obj.name
+    ]
+    collisions.sort(key=lambda obj: obj.name)
+    return collisions
+
+
+def _prepare_asset_export_names(
+    mesh_objects: list[bpy.types.Object],
+    collision_objects: list[bpy.types.Object],
+    asset_name: str,
+) -> list[tuple[bpy.types.Object, str]]:
+    renamed = []
+    if mesh_objects:
+        renamed.append((mesh_objects[0], mesh_objects[0].name))
+        mesh_objects[0].name = asset_name
+    for index, collision_obj in enumerate(collision_objects):
+        renamed.append((collision_obj, collision_obj.name))
+        export_name = f"{collision_prefix(collision_obj.name)}{asset_name}_{index:02d}"
+        stale_object = bpy.data.objects.get(export_name)
+        if stale_object is not None and stale_object not in collision_objects:
+            stale_object.name = f"UBIO_STALE_{stale_object.name}"
+        collision_obj.name = export_name
+    return renamed
+
+
+def _restore_object_names(renamed_objects: list[tuple[bpy.types.Object, str]]) -> None:
+    for obj, original_name in renamed_objects:
+        obj.name = original_name
+
+
+def _remove_collision_objects(imported_objs: list[bpy.types.Object]) -> list[bpy.types.Object]:
+    kept = []
+    for obj in imported_objs:
+        if is_ue_collision_object(obj):
+            bpy.data.objects.remove(obj, do_unlink=True)
+        else:
+            kept.append(obj)
+    return kept
+
+
+def _set_solid_viewport_object_color(context) -> None:
+    if context.screen is None:
+        return
+    for area in context.screen.areas:
+        if area.type == "VIEW_3D":
+            area.spaces.active.shading.color_type = "OBJECT"
+
+
 def _is_transform_dict_close(lhs: dict, rhs: dict, tol: float = 1e-4) -> bool:
     for key in ("location", "rotation", "scale"):
         left = lhs.get(key, {})
@@ -537,7 +606,7 @@ def create_bp_static_mesh_root_structure(session_data: dict, session_file: str):
     return session_collection, internal_collection
 
 
-def import_bp_static_mesh_session(session_file: str):
+def import_bp_static_mesh_session(session_file: str, import_collision: bool = True):
     session_data = load_static_mesh_session(session_file)
     if session_data.get("session_type") != Const.BP_STATIC_MESH_SESSION_TYPE:
         raise ValueError("invalid_session_type")
@@ -610,12 +679,16 @@ def import_bp_static_mesh_session(session_file: str):
             bake_space_transform=True,
         )
         imported_objs = [obj for obj in bpy.data.objects if obj not in before_import and obj not in existing_objs]
+        if not import_collision:
+            imported_objs = _remove_collision_objects(imported_objs)
         if not imported_objs:
             raise RuntimeError(f"no_imported_objects_for_asset:{asset_key}")
 
         imported_obj_set = set(imported_objs)
         canonical_objects = []
-        for index, obj in enumerate(sorted(imported_objs, key=lambda item: (item.type != "MESH", item.name))):
+        collision_objects = [obj for obj in imported_objs if is_ue_collision_object(obj)]
+        render_objects = [obj for obj in imported_objs if obj not in collision_objects]
+        for index, obj in enumerate(sorted(render_objects, key=lambda item: (item.type != "MESH", item.name))):
             unlink_object_from_all_collections(obj)
             asset_collection.objects.link(obj)
             obj.name = f"{make_safe_name(asset_data.get('asset_name') or asset_key)}__SRC__{index}"
@@ -632,6 +705,23 @@ def import_bp_static_mesh_session(session_file: str):
                 obj.parent = canonical_root
             canonical_objects.append(obj)
 
+        target_mesh = next((obj for obj in canonical_objects if obj.type == "MESH"), None)
+        for collision_obj in collision_objects:
+            unlink_object_from_all_collections(collision_obj)
+            asset_collection.objects.link(collision_obj)
+            apply_bp_static_mesh_session_metadata(
+                collision_obj,
+                session_file,
+                session_data,
+                collection_role=Const.BP_STATIC_MESH_ROLE_CANONICAL_COLLISION,
+                asset_key=asset_key,
+                source_asset_path=asset_data.get("asset_path", ""),
+                collection_name=session_collection.name,
+            )
+            if target_mesh is not None:
+                set_collision_target(collision_obj, target_mesh)
+            collision_obj.parent = canonical_root
+
         canonical_names = [obj.name for obj in canonical_objects]
         asset_data["canonical_root_name"] = canonical_root.name
         asset_data["canonical_object_names"] = canonical_names
@@ -639,6 +729,7 @@ def import_bp_static_mesh_session(session_file: str):
         asset_object_map[asset_key] = {
             "canonical_root": canonical_root,
             "canonical_objects": canonical_objects,
+            "canonical_collisions": collision_objects,
             "source_asset_path": asset_data.get("asset_path", ""),
         }
         import_log["assets"].append({
@@ -710,6 +801,29 @@ def import_bp_static_mesh_session(session_file: str):
             component_obj.parent = parent_obj
             _copy_local_transform(canonical_obj, component_obj)
 
+        component_target = next((obj for obj in canonical_object_map.values() if obj.type == "MESH"), None)
+        if component_target is not None:
+            for index, canonical_collision in enumerate(asset_objects["canonical_collisions"]):
+                component_collision = create_component_collision(
+                    canonical_collision,
+                    component_target,
+                    session_collection,
+                    f"COL_{make_safe_name(component_data.get('component_name') or component_key)}__{index}",
+                )
+                apply_bp_static_mesh_session_metadata(
+                    component_collision,
+                    session_file,
+                    session_data,
+                    collection_role=Const.BP_STATIC_MESH_ROLE_COMPONENT_COLLISION,
+                    asset_key=asset_key,
+                    component_key=component_key,
+                    source_asset_path=asset_objects["source_asset_path"],
+                    collection_name=session_collection.name,
+                )
+                component_collision[Const.BP_STATIC_MESH_PROP_CANONICAL_OBJECT_NAME] = canonical_collision.name
+                component_collision[Const.STATIC_MESH_PROP_COLLISION_TARGET_NAME] = component_target.name
+                component_object_names.append(component_collision.name)
+
         component_wrapper_names.append(wrapper_obj.name)
         import_log["components"].append({
             "component_key": component_key,
@@ -762,7 +876,19 @@ def export_bp_static_mesh_session_to_fbx(context, session_file: str, session_dat
             raise RuntimeError(f"no_export_objects_for_asset:{asset_key}")
 
         canonical_objects = _get_bp_canonical_objects(canonical_root)
-        export_objects = [canonical_root] + canonical_objects
+        collision_objects = _get_bp_canonical_collisions(canonical_root)
+        collision_objects, deleted_collision_names = reconcile_component_collisions(collision_objects)
+        if deleted_collision_names:
+            export_log["warnings"].append({
+                "asset_key": asset_key,
+                "warning": "component_collision_deleted",
+                "collision_object_names": deleted_collision_names,
+            })
+        for canonical_obj in canonical_objects:
+            for collision_obj in _get_collision_objects_for_target(canonical_obj):
+                if collision_obj not in collision_objects:
+                    collision_objects.append(collision_obj)
+        export_objects = [canonical_root] + canonical_objects + collision_objects
         mesh_objects = [obj for obj in canonical_objects if obj.type == "MESH"]
         if not mesh_objects:
             raise RuntimeError(f"no_export_objects_for_asset:{asset_key}")
@@ -802,26 +928,34 @@ def export_bp_static_mesh_session_to_fbx(context, session_file: str, session_dat
         active_export_object = mesh_objects[0]
         context.view_layer.objects.active = active_export_object
 
-        with context.temp_override(
-            active_object=active_export_object,
-            object=active_export_object,
-            selected_objects=export_objects,
-            selected_editable_objects=export_objects,
-        ):
-            bpy.ops.export_scene.fbx(
-                filepath=edited_fbx_path,
-                use_selection=True,
-                object_types={"MESH", "EMPTY"},
-                use_mesh_modifiers=True,
-                colors_type="SRGB",
-                prioritize_active_color=True,
-                apply_unit_scale=True,
-                bake_space_transform=False,
-                axis_forward="-Z",
-                axis_up="Y",
-                add_leaf_bones=False,
-                path_mode="AUTO",
-            )
+        renamed_collisions = _prepare_asset_export_names(
+            mesh_objects,
+            collision_objects,
+            asset_data.get("asset_name") or mesh_objects[0].name,
+        )
+        try:
+            with context.temp_override(
+                active_object=active_export_object,
+                object=active_export_object,
+                selected_objects=export_objects,
+                selected_editable_objects=export_objects,
+            ):
+                bpy.ops.export_scene.fbx(
+                    filepath=edited_fbx_path,
+                    use_selection=True,
+                    object_types={"MESH", "EMPTY"},
+                    use_mesh_modifiers=True,
+                    colors_type="SRGB",
+                    prioritize_active_color=True,
+                    apply_unit_scale=True,
+                    bake_space_transform=False,
+                    axis_forward="-Z",
+                    axis_up="Y",
+                    add_leaf_bones=False,
+                    path_mode="AUTO",
+                )
+        finally:
+            _restore_object_names(renamed_collisions)
 
         asset_data["edited_fbx"] = edited_fbx_path
         asset_data["edited_object_names"] = [obj.name for obj in canonical_objects]
@@ -833,6 +967,7 @@ def export_bp_static_mesh_session_to_fbx(context, session_file: str, session_dat
             "canonical_object_names": list(asset_data["canonical_object_names"]),
             "edited_fbx": edited_fbx_path,
             "edited_object_names": list(asset_data["edited_object_names"]),
+            "collision_object_count": len(collision_objects),
         })
 
     bpy.ops.object.select_all(action="DESELECT")
@@ -873,11 +1008,11 @@ def get_static_mesh_session_context(context):
     return None, None
 
 
-def import_static_mesh_session(session_file: str):
+def import_static_mesh_session(session_file: str, import_collision: bool = True):
     session_data = load_static_mesh_session(session_file)
     session_type = session_data.get("session_type")
     if session_type == Const.BP_STATIC_MESH_SESSION_TYPE:
-        return import_bp_static_mesh_session(session_file)
+        return import_bp_static_mesh_session(session_file, import_collision=import_collision)
     if session_type != Const.STATIC_MESH_SESSION_TYPE:
         raise ValueError("invalid_session_type")
 
@@ -904,10 +1039,23 @@ def import_static_mesh_session(session_file: str):
         bake_space_transform=True,
     )
     imported_objs = [obj for obj in bpy.data.objects if obj not in existing_objs]
+    if not import_collision:
+        imported_objs = _remove_collision_objects(imported_objs)
 
     if not imported_objs:
         raise RuntimeError("no_imported_objects")
 
+    source_asset_name = session_data.get("source_asset", {}).get("asset_name", "")
+    render_mesh = next(
+        (
+            obj for obj in imported_objs
+            if obj.type == "MESH" and obj.name == source_asset_name
+        ),
+        None,
+    ) or next(
+        (obj for obj in imported_objs if obj.type == "MESH" and not is_ue_collision_object(obj)),
+        None,
+    )
     for obj in imported_objs:
         for coll in list(obj.users_collection):
             coll.objects.unlink(obj)
@@ -918,6 +1066,8 @@ def import_static_mesh_session(session_file: str):
             session_data,
             collection_name=session_collection.name,
         )
+        if render_mesh is not None and is_ue_collision_object(obj):
+            set_collision_target(obj, render_mesh)
 
     apply_static_mesh_session_metadata(
         session_collection,
@@ -949,7 +1099,16 @@ def export_static_mesh_session_to_fbx(context, session_file: str, session_data: 
         obj
         for obj in find_static_mesh_session_objects(session_id)
         if obj.type in {"MESH", "EMPTY"}
+        and not obj.get(Const.STATIC_MESH_PROP_COLLISION_TARGET_NAME)
     ]
+
+    collision_objects = [
+        obj for obj in bpy.data.objects
+        if obj.type == "MESH"
+        and obj.get(Const.STATIC_MESH_PROP_SESSION_ID) == session_id
+        and obj.get(Const.STATIC_MESH_PROP_COLLISION_TARGET_NAME)
+    ]
+    export_objects.extend(collision_objects)
 
     if not export_objects:
         raise RuntimeError("no_export_objects")
@@ -971,20 +1130,31 @@ def export_static_mesh_session_to_fbx(context, session_file: str, session_data: 
         obj.select_set(True)
     context.view_layer.objects.active = export_objects[0]
 
-    bpy.ops.export_scene.fbx(
-        filepath=edited_fbx_path,
-        use_selection=True,
-        object_types={"MESH", "EMPTY"},
-        use_mesh_modifiers=True,
-        colors_type="SRGB",
-        prioritize_active_color=True,
-        apply_unit_scale=True,
-        bake_space_transform=False,
-        axis_forward="-Z",
-        axis_up="Y",
-        add_leaf_bones=False,
-        path_mode="AUTO",
+    source_meshes = [
+        obj for obj in export_objects
+        if obj.type == "MESH" and not obj.get(Const.STATIC_MESH_PROP_COLLISION_TARGET_NAME)
+    ]
+    asset_name = session_data.get("source_asset", {}).get("asset_name")
+    renamed_collisions = _prepare_asset_export_names(
+        source_meshes, collision_objects, asset_name or source_meshes[0].name
     )
+    try:
+        bpy.ops.export_scene.fbx(
+            filepath=edited_fbx_path,
+            use_selection=True,
+            object_types={"MESH", "EMPTY"},
+            use_mesh_modifiers=True,
+            colors_type="SRGB",
+            prioritize_active_color=True,
+            apply_unit_scale=True,
+            bake_space_transform=False,
+            axis_forward="-Z",
+            axis_up="Y",
+            add_leaf_bones=False,
+            path_mode="AUTO",
+        )
+    finally:
+        _restore_object_names(renamed_collisions)
 
     bpy.ops.object.select_all(action="DESELECT")
     for obj in previous_selection:
@@ -1012,9 +1182,17 @@ class UBIO_OT_ImportLatestStaticMeshSession(bpy.types.Operator):
     bl_idname = "ubio.import_latest_static_mesh_session"
     bl_label = msgid("op.import_latest_static_mesh.label")
     bl_description = msgid("op.import_latest_static_mesh.desc")
-    bl_options = {"UNDO"}
+    bl_options = {"REGISTER", "UNDO"}
 
     latest_session_path: bpy.props.StringProperty()
+    import_collision: BoolProperty(
+        name=msgid("prop.import_collision.name"),
+        description=msgid("prop.import_collision.desc"),
+        default=True,
+    )
+
+    def draw(self, context):
+        self.layout.prop(self, "import_collision")
 
     def execute(self, context):
         if not self.latest_session_path or not os.path.isfile(self.latest_session_path):
@@ -1025,7 +1203,10 @@ class UBIO_OT_ImportLatestStaticMeshSession(bpy.types.Operator):
         params.ubio_static_mesh_session_path = self.latest_session_path
 
         try:
-            session_data, imported_objs = import_static_mesh_session(self.latest_session_path)
+            session_data, imported_objs = import_static_mesh_session(
+                self.latest_session_path,
+                import_collision=self.import_collision,
+            )
         except FileNotFoundError as exc:
             self.report(
                 {"ERROR"},
@@ -1042,6 +1223,7 @@ class UBIO_OT_ImportLatestStaticMeshSession(bpy.types.Operator):
         for obj in imported_objs:
             obj.select_set(True)
         context.view_layer.objects.active = imported_objs[0]
+        _set_solid_viewport_object_color(context)
         self.report(
             {"INFO"},
             tr(

@@ -90,6 +90,7 @@ class UBIO_PT_ToolPanel(bpy.types.Panel):
         #     text=msgid("panel.session_path_label"),
         # )
         static_mesh_column.operator("ubio.import_latest_static_mesh_session", icon="IMPORT")
+        static_mesh_column.operator("ubio.make_collision", icon="MESH_ICOSPHERE")
         # static_mesh_column.operator("ubio.import_static_mesh_session", icon="FILE_FOLDER")
         static_mesh_column.operator("ubio.export_static_mesh_session", icon="EXPORT")
 

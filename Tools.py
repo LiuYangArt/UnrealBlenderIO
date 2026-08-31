@@ -10,6 +10,99 @@ from .util import (
     set_actor_transform,
 )
 from .i18n import msgid, tr
+from .collision import set_collision_target
+
+
+def _is_ubio_static_mesh(obj):
+    if obj is None or obj.type != "MESH":
+        return False
+    if obj.get(Const.BP_STATIC_MESH_PROP_COLLECTION_ROLE) in {
+        Const.BP_STATIC_MESH_ROLE_COMPONENT_COLLISION,
+        Const.BP_STATIC_MESH_ROLE_CANONICAL_COLLISION,
+    }:
+        return False
+    return bool(
+        obj.get(Const.STATIC_MESH_PROP_SESSION_ID)
+        and (
+            obj.get(Const.STATIC_MESH_PROP_ROUNDTRIP_TYPE)
+            or obj.get(Const.BP_STATIC_MESH_PROP_ROUNDTRIP_TYPE)
+        )
+    )
+
+
+class UBIO_OT_MakeCollision(bpy.types.Operator):
+    bl_idname = "ubio.make_collision"
+    bl_label = msgid("op.make_collision.label")
+    bl_description = msgid("op.make_collision.desc")
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == "OBJECT" and len(context.selected_objects) >= 2
+
+    def execute(self, context):
+        selected_meshes = [obj for obj in context.selected_objects if obj.type == "MESH"]
+        if len(selected_meshes) < 2:
+            self.report({"ERROR"}, tr("report.collision.need_meshes"))
+            return {"CANCELLED"}
+
+        targets = [obj for obj in selected_meshes if _is_ubio_static_mesh(obj)]
+        sources = [obj for obj in selected_meshes if not _is_ubio_static_mesh(obj)]
+        if len(targets) != 1 or not sources:
+            self.report({"ERROR"}, tr("report.collision.need_one_ubio_mesh"))
+            return {"CANCELLED"}
+
+        selected_target_obj = targets[0]
+        target_obj = selected_target_obj
+        empty_collision_objects = [obj for obj in sources if len(obj.data.polygons) == 0]
+        if empty_collision_objects:
+            self.report({"ERROR"}, tr("report.collision.empty_mesh"))
+            return {"CANCELLED"}
+        if target_obj.get(Const.BP_STATIC_MESH_PROP_COLLECTION_ROLE) == Const.BP_STATIC_MESH_ROLE_COMPONENT_OBJECT:
+            canonical_name = target_obj.get(Const.BP_STATIC_MESH_PROP_CANONICAL_OBJECT_NAME, "")
+            canonical_obj = bpy.data.objects.get(canonical_name) if canonical_name else None
+            if canonical_obj is None:
+                self.report({"ERROR"}, tr("report.collision.canonical_not_found"))
+                return {"CANCELLED"}
+            target_obj = canonical_obj
+        session_id = target_obj.get(Const.STATIC_MESH_PROP_SESSION_ID, "")
+        asset_key = target_obj.get(Const.BP_STATIC_MESH_PROP_ASSET_KEY, "")
+        existing_count = sum(
+            1 for obj in bpy.data.objects
+            if obj.get(Const.STATIC_MESH_PROP_COLLISION_TARGET_NAME) == target_obj.name
+        )
+
+        target_collection = target_obj.users_collection[0] if target_obj.users_collection else context.collection
+        for index, collision_obj in enumerate(sources, start=existing_count):
+            collision_to_target = selected_target_obj.matrix_world.inverted_safe() @ collision_obj.matrix_world
+            collision_world = target_obj.matrix_world @ collision_to_target
+            collision_obj.name = f"UBIO_COLLISION_{target_obj.name}_{index:02d}"
+            collision_obj.parent = target_obj.parent
+            collision_obj.matrix_world = collision_world
+            set_collision_target(collision_obj, target_obj)
+            collision_obj[Const.STATIC_MESH_PROP_SESSION_ID] = session_id
+            collision_obj[Const.STATIC_MESH_PROP_SESSION_FILE] = target_obj.get(
+                Const.STATIC_MESH_PROP_SESSION_FILE, ""
+            )
+            collision_obj[Const.STATIC_MESH_PROP_ROUNDTRIP_TYPE] = target_obj.get(
+                Const.STATIC_MESH_PROP_ROUNDTRIP_TYPE, ""
+            )
+            if asset_key:
+                collision_obj[Const.STATIC_MESH_PROP_COLLISION_ASSET_KEY] = asset_key
+                collision_obj[Const.BP_STATIC_MESH_PROP_ASSET_KEY] = asset_key
+                collision_obj[Const.BP_STATIC_MESH_PROP_SESSION_ID] = target_obj.get(
+                    Const.BP_STATIC_MESH_PROP_SESSION_ID, session_id
+                )
+                collision_obj[Const.BP_STATIC_MESH_PROP_COLLECTION_ROLE] = Const.BP_STATIC_MESH_ROLE_CANONICAL_COLLISION
+
+            for collection in list(collision_obj.users_collection):
+                collection.objects.unlink(collision_obj)
+            target_collection.objects.link(collision_obj)
+            collision_obj.select_set(True)
+
+        context.view_layer.objects.active = sources[-1]
+        self.report({"INFO"}, tr("report.collision.created_many", count=len(sources)))
+        return {"FINISHED"}
 
 class UBIO_OT_AddProxyPivot(bpy.types.Operator):
     bl_idname = "ubio.add_proxy_pivot"
