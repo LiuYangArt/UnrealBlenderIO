@@ -9,3 +9,4 @@ _backup/**
 .cursor/*
 memory-bank/*
 *.code-workspace
+artifacts/

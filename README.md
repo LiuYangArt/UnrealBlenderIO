@@ -24,3 +24,7 @@ how to install:
 ## License
 
 This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+
+## 自动生成 UE 碰撞
+
+Windows x64 扩展现支持按源资产生成可编辑 UCX、保留规则矩形门窗和地面小凸起处理。使用方法、限制和依赖见 [碰撞工作流](docs/collision-generation.md)。

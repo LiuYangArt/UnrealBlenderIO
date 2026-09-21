@@ -1,11 +1,11 @@
 import bpy
 import os
 from bpy.props import (
-    # BoolProperty,
+    BoolProperty,
     # EnumProperty,
-    # FloatProperty,
+    FloatProperty,
     # FloatVectorProperty,
-    # IntProperty,
+    IntProperty,
     StringProperty,
 )
 from bpy.types import PropertyGroup
@@ -54,6 +54,15 @@ class UBIO_PG_Params(PropertyGroup):
     )
         
 
+    collision_max_hulls: IntProperty(name=msgid('prop.collision.max_hulls.name'), description=msgid('prop.collision.max_hulls.desc'), default=16, min=1, max=256)
+    collision_error: FloatProperty(name=msgid('prop.collision.error.name'), description=msgid('prop.collision.error.desc'), default=0.2, min=0.001, max=1, precision=3)
+    collision_min_volume: FloatProperty(name=msgid('prop.collision.min_volume.name'), description=msgid('prop.collision.min_volume.desc'), default=0.000001, min=0, precision=6)
+    collision_min_thickness: FloatProperty(name=msgid('prop.collision.min_thickness.name'), description=msgid('prop.collision.min_thickness.desc'), default=0.005, min=0, precision=3)
+    collision_feature_size: FloatProperty(name=msgid('prop.collision.feature_size.name'), description=msgid('prop.collision.feature_size.desc'), default=0.1, min=0, precision=3)
+    collision_ground: BoolProperty(name=msgid('prop.collision.ground.name'), description=msgid('prop.collision.ground.desc'), default=False)
+    collision_preserve_openings: BoolProperty(name=msgid('prop.collision.preserve_openings.name'), description=msgid('prop.collision.preserve_openings.desc'), default=True)
+
+
 class UBIO_PT_ToolPanel(bpy.types.Panel):
     bl_idname = "UBIO_PT_tool_panel"
     bl_label = msgid("panel.main_title")
@@ -79,6 +88,14 @@ class UBIO_PT_ToolPanel(bpy.types.Panel):
         box_column.operator("ubio.add_proxy_pivot", icon="EMPTY_ARROWS")
         box_column.operator("ubio.mirror_copy_actors", icon="MOD_MIRROR")
         box_column.operator("ubio.select_same_class_actors", icon="MESH_DATA")
+
+        collision_column = layout.box().column(align=True)
+        collision_column.label(text=msgid("panel.collision.title"))
+        for name in ('max_hulls', 'error', 'min_volume', 'min_thickness', 'feature_size', 'preserve_openings', 'ground'):
+            collision_column.prop(context.scene.ubio_params, 'collision_' + name)
+        collision_column.separator()
+        collision_column.label(text=msgid("panel.collision.manual_hint"), icon="INFO")
+        collision_column.operator("ubio.generate_collision", icon="MOD_PHYSICS")
 
         static_mesh_box = layout.box()
         static_mesh_column = static_mesh_box.column()
