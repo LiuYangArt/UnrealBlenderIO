@@ -546,14 +546,54 @@ def _restore_object_names(renamed_objects: list[tuple[bpy.types.Object, str]]) -
         obj.name = original_name
 
 
-def _remove_collision_objects(imported_objs: list[bpy.types.Object]) -> list[bpy.types.Object]:
-    kept = []
-    for obj in imported_objs:
-        if is_ue_collision_object(obj):
+def _import_mesh_fbx(filepath: str, *, collision_only: bool = False) -> list[bpy.types.Object]:
+    before_objects = set(bpy.data.objects)
+    before_meshes = set(bpy.data.meshes)
+    before_materials = set(bpy.data.materials)
+    bpy.ops.import_scene.fbx(
+        filepath=filepath,
+        use_custom_normals=True,
+        use_custom_props=False,
+        use_image_search=False,
+        use_anim=False,
+        bake_space_transform=True,
+    )
+    imported = [obj for obj in bpy.data.objects if obj not in before_objects]
+    if not collision_only:
+        return imported
+
+    # UE includes a render mesh in the collision FBX; it must never become editable source geometry.
+    collisions = [obj for obj in imported if is_ue_collision_object(obj)]
+    for obj in collisions:
+        world_transform = obj.matrix_world.copy()
+        obj.parent = None
+        obj.matrix_world = world_transform
+    for obj in imported:
+        if obj not in collisions:
             bpy.data.objects.remove(obj, do_unlink=True)
-        else:
-            kept.append(obj)
-    return kept
+    for mesh in list(bpy.data.meshes):
+        if mesh not in before_meshes and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+    for material in list(bpy.data.materials):
+        if material not in before_materials and material.users == 0:
+            bpy.data.materials.remove(material)
+    return collisions
+
+
+def _validate_mesh_fbx_paths(paths: dict, import_collision: bool) -> None:
+    for key in ("source_fbx", "collision_fbx") if import_collision else ("source_fbx",):
+        path = paths.get(key, "")
+        if not path or not os.path.isfile(path):
+            raise FileNotFoundError(path or key)
+
+
+def _import_mesh_fbx_pair(paths: dict, import_collision: bool) -> list[bpy.types.Object]:
+    imported = _import_mesh_fbx(paths["source_fbx"])
+    if not any(obj.type == "MESH" and not is_ue_collision_object(obj) for obj in imported):
+        raise RuntimeError("no_imported_source_mesh")
+    if import_collision:
+        imported.extend(_import_mesh_fbx(paths["collision_fbx"], collision_only=True))
+    return imported
 
 
 def _set_solid_viewport_object_color(context) -> None:
@@ -611,6 +651,8 @@ def import_bp_static_mesh_session(session_file: str, import_collision: bool = Tr
     if session_data.get("session_type") != Const.BP_STATIC_MESH_SESSION_TYPE:
         raise ValueError("invalid_session_type")
 
+    for asset_data in session_data.get("assets", []):
+        _validate_mesh_fbx_paths(asset_data, import_collision)
     session_collection, internal_collection = create_bp_static_mesh_root_structure(session_data, session_file)
     actor_label = session_data.get("source_actor", {}).get("label") or "Blueprint"
     root_name = f"BP_{make_safe_name(actor_label)}_ROOT"
@@ -625,7 +667,6 @@ def import_bp_static_mesh_session(session_file: str, import_collision: bool = Tr
     )
     set_actor_transform(root_obj, _get_identity_transform())
 
-    existing_objs = set(bpy.data.objects)
     asset_object_map = {}
     import_log = {
         "session_id": session_data.get("session_id", ""),
@@ -669,20 +710,7 @@ def import_bp_static_mesh_session(session_file: str, import_collision: bool = Tr
         )
         set_actor_transform(canonical_root, _get_identity_transform())
 
-        before_import = set(bpy.data.objects)
-        bpy.ops.import_scene.fbx(
-            filepath=source_fbx,
-            use_custom_normals=True,
-            use_custom_props=False,
-            use_image_search=False,
-            use_anim=False,
-            bake_space_transform=True,
-        )
-        imported_objs = [obj for obj in bpy.data.objects if obj not in before_import and obj not in existing_objs]
-        if not import_collision:
-            imported_objs = _remove_collision_objects(imported_objs)
-        if not imported_objs:
-            raise RuntimeError(f"no_imported_objects_for_asset:{asset_key}")
+        imported_objs = _import_mesh_fbx_pair(asset_data, import_collision)
 
         imported_obj_set = set(imported_objs)
         canonical_objects = []
@@ -736,6 +764,8 @@ def import_bp_static_mesh_session(session_file: str, import_collision: bool = Tr
             "asset_key": asset_key,
             "asset_path": asset_data.get("asset_path", ""),
             "source_fbx": source_fbx,
+            "collision_fbx": asset_data["collision_fbx"],
+            "collision_object_count": len(collision_objects),
             "canonical_root_name": canonical_root.name,
             "canonical_object_names": canonical_names,
         })
@@ -1016,9 +1046,8 @@ def import_static_mesh_session(session_file: str, import_collision: bool = True)
     if session_type != Const.STATIC_MESH_SESSION_TYPE:
         raise ValueError("invalid_session_type")
 
-    source_fbx = session_data.get("paths", {}).get("source_fbx")
-    if not source_fbx or not os.path.isfile(source_fbx):
-        raise FileNotFoundError(source_fbx or "")
+    paths = session_data["paths"]
+    _validate_mesh_fbx_paths(paths, import_collision)
 
     collection_name = build_static_mesh_collection_name(session_data)
     session_collection = bpy.data.collections.get(collection_name)
@@ -1029,21 +1058,7 @@ def import_static_mesh_session(session_file: str, import_collision: bool = True)
         for obj in list(session_collection.objects):
             bpy.data.objects.remove(obj, do_unlink=True)
 
-    existing_objs = set(bpy.data.objects)
-    bpy.ops.import_scene.fbx(
-        filepath=source_fbx,
-        use_custom_normals=True,
-        use_custom_props=False,
-        use_image_search=False,
-        use_anim=False,
-        bake_space_transform=True,
-    )
-    imported_objs = [obj for obj in bpy.data.objects if obj not in existing_objs]
-    if not import_collision:
-        imported_objs = _remove_collision_objects(imported_objs)
-
-    if not imported_objs:
-        raise RuntimeError("no_imported_objects")
+    imported_objs = _import_mesh_fbx_pair(paths, import_collision)
 
     source_asset_name = session_data.get("source_asset", {}).get("asset_name", "")
     render_mesh = next(
@@ -1213,8 +1228,13 @@ class UBIO_OT_ImportLatestStaticMeshSession(bpy.types.Operator):
                 tr("report.static_mesh.source_fbx_not_found", path=str(exc)),
             )
             return {"CANCELLED"}
-        except ValueError:
-            self.report({"ERROR"}, tr("report.static_mesh.invalid_session_type"))
+        except ValueError as exc:
+            message_key = (
+                "report.static_mesh.unsupported_session_version"
+                if str(exc) == "unsupported_session_version"
+                else "report.static_mesh.invalid_session_type"
+            )
+            self.report({"ERROR"}, tr(message_key))
             return {"CANCELLED"}
         except Exception:
             self.report({"ERROR"}, tr("report.static_mesh.import_failed"))

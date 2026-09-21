@@ -104,3 +104,11 @@
 ## Unreal Python
 优先参考：
 - `.agents\skills\unreal-python-api-lookup`
+
+## 验证命令与证据
+
+- 纯 Python 选项回归：`python -B -m unittest discover -s tests -p test_source_mesh_export.py -v`
+- 当前 UE 编辑器导出验证：在已打开的 UE 编辑器 Python 远程执行 `tests/validate_source_mesh_ue.py`。
+- Blender 往返验证：`blender.exe --background --factory-startup --python-exit-code 1 --python tests/validate_source_mesh_blender.py`
+- Nanite 源网格与碰撞拆分证据写入 `artifacts/nanite-source/`，包括 `ue_export.json`、`blender_validation.json` 和对应 FBX 文件。
+- UE 验证只创建临时 FBX 和会话文件；完成前后检查 dirty content packages，禁止保存源资产。

@@ -72,7 +72,7 @@
     "report.static_mesh.latest_session_not_found": "Failed to find the latest StaticMesh or Blueprint session",
     "report.static_mesh.no_session_in_dir": "No StaticMesh or Blueprint session was found in {path}",
     "report.static_mesh.session_file_not_found": "Cannot find StaticMesh or Blueprint session file: {path}",
-    "report.static_mesh.source_fbx_not_found": "Cannot find source FBX file: {path}",
+    "report.static_mesh.source_fbx_not_found": "Session FBX file not found: {path}",
     "report.static_mesh.invalid_session_type": "The selected file is not a UBIO StaticMesh / Blueprint session",
     "report.static_mesh.import_failed": "Failed to import StaticMesh / Blueprint session",
     "report.static_mesh.import_success": "Roundtrip session imported: {session_id}",
@@ -101,5 +101,6 @@
     "report.collision.need_meshes": "Select one UBIO StaticMesh and at least one regular collision mesh",
     "report.collision.created_many": "Created {count} UBIO collision meshes",
     "prop.import_collision.name": "Import Collision",
-    "prop.import_collision.desc": "Import custom collision meshes included with the Unreal StaticMesh"
+    "prop.import_collision.desc": "Import custom collision meshes included with the Unreal StaticMesh",
+    "report.static_mesh.unsupported_session_version": "This session uses an outdated mesh export format. Update the UE script and export from UE again."
 }

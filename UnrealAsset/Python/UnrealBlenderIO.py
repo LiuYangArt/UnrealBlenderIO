@@ -10,13 +10,14 @@ STATIC_MESH_SESSION_DIR = os.path.join(DEFAULT_IO_TEMP_DIR, "StaticMeshSessions"
 BP_STATIC_MESH_SESSION_DIR = os.path.join(DEFAULT_IO_TEMP_DIR, "BPStaticMeshSessions")
 STATIC_MESH_SESSION_FILE = "session.json"
 STATIC_MESH_SOURCE_FBX = "source.fbx"
+STATIC_MESH_COLLISION_FBX = "collision.fbx"
 STATIC_MESH_EDITED_FBX = "edited.fbx"
 BP_STATIC_MESH_ASSETS_DIR_NAME = "assets"
 BP_STATIC_MESH_LOGS_DIR_NAME = "logs"
 STATIC_MESH_SESSION_TYPE = "static_mesh_roundtrip"
 BP_STATIC_MESH_SESSION_TYPE = "bp_static_mesh_roundtrip"
-STATIC_MESH_SCHEMA_VERSION = "1.0"
-BP_STATIC_MESH_SCHEMA_VERSION = "2.2"
+STATIC_MESH_SCHEMA_VERSION = "2.0"
+BP_STATIC_MESH_SCHEMA_VERSION = "3.0"
 STATIC_MESH_STATUS_EXPORTED_FROM_UE = "EXPORTED_FROM_UE"
 STATIC_MESH_STATUS_IMPORTED_IN_BLENDER = "IMPORTED_IN_BLENDER"
 STATIC_MESH_STATUS_EXPORTED_FROM_BLENDER = "EXPORTED_FROM_BLENDER"
@@ -90,6 +91,10 @@ def get_bp_static_mesh_source_fbx_path(session_dir, asset_key):
     return os.path.join(get_bp_static_mesh_asset_dir(session_dir, asset_key), STATIC_MESH_SOURCE_FBX)
 
 
+def get_bp_static_mesh_collision_fbx_path(session_dir, asset_key):
+    return os.path.join(get_bp_static_mesh_asset_dir(session_dir, asset_key), STATIC_MESH_COLLISION_FBX)
+
+
 def get_bp_static_mesh_edited_fbx_path(session_dir, asset_key):
     return os.path.join(get_bp_static_mesh_asset_dir(session_dir, asset_key), STATIC_MESH_EDITED_FBX)
 
@@ -138,6 +143,10 @@ def get_session_file_path(session_dir):
 
 def get_static_mesh_source_fbx_path(session_dir):
     return os.path.join(session_dir, STATIC_MESH_SOURCE_FBX)
+
+
+def get_static_mesh_collision_fbx_path(session_dir):
+    return os.path.join(session_dir, STATIC_MESH_COLLISION_FBX)
 
 
 def get_static_mesh_edited_fbx_path(session_dir):
@@ -261,8 +270,15 @@ def normalize_bp_static_mesh_session_data(session_data, session_dir):
 def load_static_mesh_session(session_file):
     session_data = read_json_file(session_file)
     session_dir = os.path.dirname(session_file)
-    session_type = session_data.get("session_type", STATIC_MESH_SESSION_TYPE)
-    session_data.setdefault("session_type", session_type)
+    session_type = session_data.get("session_type")
+    expected_version = {
+        STATIC_MESH_SESSION_TYPE: STATIC_MESH_SCHEMA_VERSION,
+        BP_STATIC_MESH_SESSION_TYPE: BP_STATIC_MESH_SCHEMA_VERSION,
+    }.get(session_type)
+    if expected_version is None:
+        raise ValueError("invalid_session_type")
+    if session_data.get("schema_version") != expected_version:
+        raise ValueError("unsupported_session_version")
     session_data.setdefault("timestamps", {})
 
     if session_type == BP_STATIC_MESH_SESSION_TYPE:
@@ -438,6 +454,7 @@ def build_static_mesh_session_data(actor, static_mesh, session_id, session_dir, 
         },
         "paths": {
             "source_fbx": get_static_mesh_source_fbx_path(session_dir),
+            "collision_fbx": get_static_mesh_collision_fbx_path(session_dir),
             "edited_fbx": get_static_mesh_edited_fbx_path(session_dir),
         },
         "export_options": {
@@ -553,6 +570,7 @@ def build_bp_static_mesh_session_data(actor, components, session_id, session_dir
                 "asset_name": asset_name,
                 "asset_path": asset_path,
                 "source_fbx": get_bp_static_mesh_source_fbx_path(session_dir, asset_key),
+                "collision_fbx": get_bp_static_mesh_collision_fbx_path(session_dir, asset_key),
                 "edited_fbx": get_bp_static_mesh_edited_fbx_path(session_dir, asset_key),
                 "component_keys": [],
                 "canonical_root_name": f"SRC_{make_safe_name(asset_name)}_ROOT",
@@ -585,6 +603,7 @@ def build_bp_static_mesh_session_data(actor, components, session_id, session_dir
             "asset_key": asset_record["asset_key"],
             "asset_path": asset_record["asset_path"],
             "source_fbx": asset_record["source_fbx"],
+            "collision_fbx": asset_record["collision_fbx"],
             "component_keys": list(asset_record["component_keys"]),
             "canonical_root_name": asset_record["canonical_root_name"],
         })
@@ -636,6 +655,30 @@ def build_bp_static_mesh_session_data(actor, components, session_id, session_dir
 
 
 def export_static_mesh_asset_to_fbx(static_mesh, output_fbx_path):
+    # Match UE's source selection and reject missing source data before it can use render data.
+    has_nanite_source = False
+    if static_mesh.get_editor_property("nanite_settings").enabled:
+        if not hasattr(unreal, "GeometryScript_AssetUtils"):
+            raise RuntimeError("geometry_script_required_for_nanite_source_validation")
+        has_nanite_source = unreal.GeometryScript_AssetUtils.get_num_static_mesh_lods_of_type(
+            static_mesh, unreal.GeometryScriptLODType.HI_RES_SOURCE_MODEL
+        ) > 0
+    if has_nanite_source:
+        source_info = "NANITE_HI_RES"
+    else:
+        source = static_mesh.get_static_mesh_description(0)
+        if source is None or source.get_triangle_count() == 0:
+            raise RuntimeError(f"static_mesh_source_data_unavailable: {static_mesh.get_path_name()}")
+        source_info = f"SOURCE_LOD0 vertices={source.get_vertex_count()} triangles={source.get_triangle_count()}"
+    log_static_mesh_info(f"Geometry source: asset={static_mesh.get_path_name()} source={source_info}")
+    return _export_static_mesh_fbx(static_mesh, output_fbx_path, source_mesh=True)
+
+
+def export_static_mesh_collision_to_fbx(static_mesh, output_fbx_path):
+    return _export_static_mesh_fbx(static_mesh, output_fbx_path, source_mesh=False)
+
+
+def _export_static_mesh_fbx(static_mesh, output_fbx_path, *, source_mesh):
     output_dir = os.path.dirname(output_fbx_path)
     ensure_directory(output_dir)
     log_static_mesh_info(
@@ -643,10 +686,11 @@ def export_static_mesh_asset_to_fbx(static_mesh, output_fbx_path):
     )
 
     export_options = unreal.FbxExportOption()
-    export_options.export_source_mesh = True
+    # Source mesh and collision are mutually exclusive in UE's FBX exporter.
+    export_options.export_source_mesh = source_mesh
     export_options.vertex_color = True
     export_options.level_of_detail = False
-    export_options.collision = True
+    export_options.collision = not source_mesh
 
     export_task = unreal.AssetExportTask()
     export_task.object = static_mesh
@@ -1256,6 +1300,7 @@ def ubio_export_selected_bp_static_meshes_to_blender(actor=None):
             if static_mesh is None:
                 raise RuntimeError(f"source_asset_not_found: {asset_path}")
             export_static_mesh_asset_to_fbx(static_mesh, asset_record["source_fbx"])
+            export_static_mesh_collision_to_fbx(static_mesh, asset_record["collision_fbx"])
 
         save_static_mesh_session(session_file_path, session_data)
         write_bp_static_mesh_log(session_dir, 'export_ue.json', export_log)
@@ -1297,6 +1342,7 @@ def ubio_export_selected_static_mesh_to_blender():
             selection_source,
         )
         export_static_mesh_asset_to_fbx(static_mesh, source_fbx_path)
+        export_static_mesh_collision_to_fbx(static_mesh, session_data["paths"]["collision_fbx"])
         save_static_mesh_session(session_file_path, session_data)
 
         log_static_mesh_info(f"StaticMesh session exported successfully: {session_file_path}")

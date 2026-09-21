@@ -44,8 +44,8 @@ class Const:
     BP_STATIC_MESH_LOGS_DIR_NAME = "logs"
     STATIC_MESH_SESSION_TYPE = "static_mesh_roundtrip"
     BP_STATIC_MESH_SESSION_TYPE = "bp_static_mesh_roundtrip"
-    STATIC_MESH_SESSION_SCHEMA_VERSION = "1.0"
-    BP_STATIC_MESH_SESSION_SCHEMA_VERSION = "2.2"
+    STATIC_MESH_SESSION_SCHEMA_VERSION = "2.0"
+    BP_STATIC_MESH_SESSION_SCHEMA_VERSION = "3.0"
     STATIC_MESH_COLLECTION_PREFIX = "UBIO_StaticMesh"
     BP_STATIC_MESH_COLLECTION_PREFIX = "UBIO_BP"
     STATIC_MESH_PROP_SESSION_ID = "ubio_session_id"
@@ -544,8 +544,15 @@ def normalize_bp_static_mesh_session_data(session_data: dict, session_dir: str) 
 def load_static_mesh_session(session_file: str):
     session_data = load_json_file(session_file)
     session_dir = os.path.dirname(session_file)
-    session_type = session_data.get("session_type", Const.STATIC_MESH_SESSION_TYPE)
-    session_data.setdefault("session_type", session_type)
+    session_type = session_data.get("session_type")
+    expected_version = {
+        Const.STATIC_MESH_SESSION_TYPE: Const.STATIC_MESH_SESSION_SCHEMA_VERSION,
+        Const.BP_STATIC_MESH_SESSION_TYPE: Const.BP_STATIC_MESH_SESSION_SCHEMA_VERSION,
+    }.get(session_type)
+    if expected_version is None:
+        raise ValueError("invalid_session_type")
+    if session_data.get("schema_version") != expected_version:
+        raise ValueError("unsupported_session_version")
     session_data.setdefault("timestamps", {})
 
     if session_type == Const.BP_STATIC_MESH_SESSION_TYPE:

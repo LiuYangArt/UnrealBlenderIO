@@ -72,7 +72,7 @@
     "report.static_mesh.latest_session_not_found": "未能找到最新的 StaticMesh 或 Blueprint 会话",
     "report.static_mesh.no_session_in_dir": "在 {path} 中找不到 StaticMesh 或 Blueprint 会话",
     "report.static_mesh.session_file_not_found": "找不到 StaticMesh 或 Blueprint 会话文件: {path}",
-    "report.static_mesh.source_fbx_not_found": "找不到源 FBX 文件: {path}",
+    "report.static_mesh.source_fbx_not_found": "找不到会话 FBX 文件: {path}",
     "report.static_mesh.invalid_session_type": "所选文件不是 UBIO StaticMesh / Blueprint 会话",
     "report.static_mesh.import_failed": "导入 StaticMesh / Blueprint 会话失败",
     "report.static_mesh.import_success": "已导入往返会话: {session_id}",
@@ -101,5 +101,6 @@
     "report.collision.need_meshes": "请选择一个 UBIO StaticMesh 和至少一个普通碰撞网格",
     "report.collision.created_many": "已创建 {count} 个 UBIO 碰撞",
     "prop.import_collision.name": "导入碰撞",
-    "prop.import_collision.desc": "导入 Unreal StaticMesh 随附的自定义碰撞网格"
+    "prop.import_collision.desc": "导入 Unreal StaticMesh 随附的自定义碰撞网格",
+    "report.static_mesh.unsupported_session_version": "此会话使用旧版网格导出格式，请更新 UE 脚本并重新从 UE 导出。"
 }
